@@ -19,6 +19,13 @@ export interface AnnouncementRow {
   created_at: string;
 }
 
+export interface LeagueFeedbackRow {
+  id: string;
+  season_id: string;
+  message: string;
+  created_at: string;
+}
+
 export interface SeasonIntakeMondayRow {
   season_id: string;
   monday_date: string;
@@ -139,6 +146,32 @@ export async function fetchAnnouncements(
     .order('created_at', { ascending: false });
   if (error) throw error;
   return (data ?? []) as AnnouncementRow[];
+}
+
+export async function fetchLeagueFeedback(
+  seasonId: string
+): Promise<LeagueFeedbackRow[]> {
+  const sb = requireSupabase();
+  const { data, error } = await sb
+    .from('league_feedback')
+    .select('id, season_id, message, created_at')
+    .eq('season_id', seasonId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as LeagueFeedbackRow[];
+}
+
+export async function rpcSubmitLeagueFeedback(
+  seasonSlug: string,
+  message: string
+): Promise<string> {
+  const sb = requireSupabase();
+  const { data, error } = await sb.rpc('submit_league_feedback', {
+    p_season_slug: seasonSlug,
+    p_message: message,
+  });
+  if (error) throw error;
+  return data as string;
 }
 
 export async function fetchSeasonIntakeMondays(

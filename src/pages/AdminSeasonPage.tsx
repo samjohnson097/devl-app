@@ -10,6 +10,7 @@ import {
   fetchSeasonBySlug,
   fetchSeasons,
   fetchSeasonIntakeMondays,
+  fetchLeagueFeedback,
   rpcAdminAddAnnouncement,
   rpcAdminAddPlayer,
   rpcAdminCreateGameNight,
@@ -20,6 +21,7 @@ import {
   rpcSaveStageMatches,
   rpcSetAttendance,
   type AnnouncementRow,
+  type LeagueFeedbackRow,
   type GameNightRow,
   type PlayerRow,
   type SeasonIntakeMondayRow,
@@ -57,6 +59,7 @@ export function AdminSeasonPage() {
     'players' | 'nights' | 'playoffs' | 'standings' | 'settings'
   >('players');
   const [announcements, setAnnouncements] = useState<AnnouncementRow[]>([]);
+  const [leagueFeedback, setLeagueFeedback] = useState<LeagueFeedbackRow[]>([]);
   const [intakeMondays, setIntakeMondays] = useState<SeasonIntakeMondayRow[]>([]);
   const [announcementText, setAnnouncementText] = useState('');
   const [newName, setNewName] = useState('');
@@ -103,16 +106,18 @@ export function AdminSeasonPage() {
     const s = await fetchSeasonBySlug(slug);
     setSeason(s);
     if (!s) return;
-    const [pl, gn, matches, anns, mondays] = await Promise.all([
+    const [pl, gn, matches, anns, mondays, feedback] = await Promise.all([
       fetchPlayers(s.id),
       fetchGameNights(s.id),
       fetchAllScoredMatchesForSeason(s.id),
       fetchAnnouncements(s.id),
       fetchSeasonIntakeMondays(s.id),
+      fetchLeagueFeedback(s.id),
     ]);
     setPlayers(pl);
     setNights(gn);
     setAnnouncements(anns);
+    setLeagueFeedback(feedback);
     setIntakeMondays(mondays);
     setStandings(computeStandings(pl, matches));
     try {
@@ -1170,6 +1175,34 @@ export function AdminSeasonPage() {
                 </li>
               ))}
             </ul>
+          </section>
+          <section className="card">
+            <h2>Anonymous feedback</h2>
+            <p className="hint">
+              Messages sent from the league home page (Feedback section). Newest
+              first.
+            </p>
+            {leagueFeedback.length === 0 ? (
+              <p className="muted">No feedback yet.</p>
+            ) : (
+              <ul className="list">
+                {leagueFeedback.map((f) => (
+                  <li key={f.id} className="list-row left">
+                    <span>
+                      <strong>
+                        {new Date(f.created_at).toLocaleString(undefined, {
+                          dateStyle: 'medium',
+                          timeStyle: 'short',
+                        })}
+                      </strong>
+                      <div style={{ marginTop: '0.35rem', whiteSpace: 'pre-wrap' }}>
+                        {f.message}
+                      </div>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
           <section className="card">
             <h2>Intake Mondays (next 8)</h2>

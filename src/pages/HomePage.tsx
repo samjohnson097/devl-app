@@ -10,6 +10,7 @@ import {
   fetchMatchesForNights,
   fetchSeasonIntakeMondays,
   rpcCreateSeason,
+  rpcSubmitLeagueFeedback,
   type MatchRow,
 } from '../api/leagueApi';
 import { useAuth } from '../auth/AuthContext';
@@ -66,6 +67,10 @@ export function HomePage() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [created, setCreated] = useState<{ slug: string } | null>(null);
+  const [feedbackText, setFeedbackText] = useState('');
+  const [feedbackBusy, setFeedbackBusy] = useState(false);
+  const [feedbackOk, setFeedbackOk] = useState<string | null>(null);
+  const [feedbackErr, setFeedbackErr] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isSupabaseConfigured) return;
@@ -94,6 +99,38 @@ export function HomePage() {
       prev && seasons.some((s) => s.slug === prev) ? prev : seasons[0].slug
     );
   }, [seasons, session?.user?.id]);
+
+  useEffect(() => {
+    setFeedbackOk(null);
+    setFeedbackErr(null);
+  }, [selectedSlug]);
+
+  async function onSubmitFeedback(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedSlug || !isSupabaseConfigured) return;
+    const msg = feedbackText.trim();
+    if (!msg) {
+      setFeedbackErr('Please enter a message.');
+      return;
+    }
+    setFeedbackBusy(true);
+    setFeedbackErr(null);
+    setFeedbackOk(null);
+    try {
+      const sb = requireSupabase();
+      await withJwtRetry(sb, () =>
+        rpcSubmitLeagueFeedback(selectedSlug, feedbackText)
+      );
+      setFeedbackText('');
+      setFeedbackOk(
+        'Thanks — your message was sent to the league organizers anonymously.'
+      );
+    } catch (er: unknown) {
+      setFeedbackErr(formatAppError(er));
+    } finally {
+      setFeedbackBusy(false);
+    }
+  }
 
   const reloadSelectedSeason = useCallback(async () => {
     if (!selectedSlug || !isSupabaseConfigured) return;
@@ -441,6 +478,54 @@ export function HomePage() {
                 <p className="muted">No scored matches yet.</p>
               ) : null}
             </div>
+          </section>
+
+          <section className="card">
+            <h2>Feedback</h2>
+            <p className="muted" style={{ marginTop: 0 }}>
+              Send anonymous feedback to the organizers for the season selected
+              above. You do not need to sign in.
+            </p>
+            {!selectedSlug ? (
+              <p className="muted">Choose a season from the menu to send feedback.</p>
+            ) : (
+              <form className="form" onSubmit={onSubmitFeedback}>
+                <label className="field">
+                  <span>Message</span>
+                  <textarea
+                    value={feedbackText}
+                    onChange={(e) => {
+                      setFeedbackText(e.target.value);
+                      setFeedbackOk(null);
+                      setFeedbackErr(null);
+                    }}
+                    rows={4}
+                    maxLength={2000}
+                    placeholder="Suggestions, concerns, or thanks…"
+                    disabled={feedbackBusy || !isSupabaseConfigured}
+                  />
+                </label>
+                {feedbackErr ? (
+                  <p className="error" style={{ marginTop: 0 }}>
+                    {feedbackErr}
+                  </p>
+                ) : null}
+                {feedbackOk ? (
+                  <p className="hint" style={{ marginTop: 0 }}>
+                    {feedbackOk}
+                  </p>
+                ) : null}
+                <button
+                  type="submit"
+                  className="btn primary"
+                  disabled={
+                    feedbackBusy || !isSupabaseConfigured || !feedbackText.trim()
+                  }
+                >
+                  {feedbackBusy ? 'Sending…' : 'Send feedback'}
+                </button>
+              </form>
+            )}
           </section>
         </div>
       </div>

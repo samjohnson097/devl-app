@@ -599,6 +599,17 @@ create table if not exists public.announcements (
 create index if not exists announcements_season_idx
   on public.announcements (season_id, created_at desc);
 
+-- Anonymous feedback from the public home page (organizers read in season Settings).
+create table if not exists public.league_feedback (
+  id uuid primary key default gen_random_uuid(),
+  season_id uuid not null references public.seasons (id) on delete cascade,
+  message text not null check (char_length(message) <= 2000),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists league_feedback_season_idx
+  on public.league_feedback (season_id, created_at desc);
+
 create table if not exists public.season_intake_mondays (
   season_id uuid not null references public.seasons (id) on delete cascade,
   monday_date date not null,
@@ -791,6 +802,34 @@ begin
 end;
 $$;
 
+drop function if exists public.submit_league_feedback(text, text);
+create or replace function public.submit_league_feedback(
+  p_season_slug text,
+  p_message text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+set row_security = off
+as $$
+declare
+  v_season uuid;
+  v_id uuid;
+  v_msg text;
+begin
+  select id into v_season from public.seasons where slug = p_season_slug;
+  if v_season is null then raise exception 'Season not found'; end if;
+  v_msg := trim(p_message);
+  if length(v_msg) < 1 then raise exception 'Message required'; end if;
+  if length(v_msg) > 2000 then raise exception 'Message too long'; end if;
+  insert into public.league_feedback (season_id, message)
+  values (v_season, v_msg)
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
 grant select on public.announcements to anon, authenticated;
 grant select on public.season_intake_mondays to anon, authenticated;
 grant select on public.player_monday_availability to anon, authenticated;
@@ -800,6 +839,10 @@ grant execute on function public.create_season_with_mondays(text, int, int, date
 grant execute on function public.admin_set_intake_mondays(text, jsonb) to authenticated;
 grant execute on function public.admin_add_announcement(text, text) to authenticated;
 grant execute on function public.admin_delete_announcement(uuid) to authenticated;
+
+grant select on public.league_feedback to authenticated;
+revoke all on table public.league_feedback from anon;
+grant execute on function public.submit_league_feedback(text, text) to anon, authenticated;
 
 revoke execute on function public.create_season_with_mondays(text, int, int, date) from anon;
 revoke execute on function public.admin_set_intake_mondays(text, jsonb) from anon;
