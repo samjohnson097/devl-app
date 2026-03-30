@@ -1,5 +1,6 @@
 import React from 'react';
 import { Analytics } from '@vercel/analytics/react';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router-dom';
 import './App.css';
 import { RequireAdmin } from './components/RequireAdmin';
@@ -71,6 +72,7 @@ function App() {
       </Routes>
     </BrowserRouter>
     <Analytics />
+    <SpeedInsights />
     </>
   );
 }
