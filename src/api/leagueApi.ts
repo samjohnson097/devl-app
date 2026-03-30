@@ -497,6 +497,43 @@ export async function rpcSaveSchedule(
   if (error) throw error;
 }
 
+export async function rpcClearRegularMatchesForManual(
+  gameNightId: string
+): Promise<void> {
+  const sb = requireSupabase();
+  const { error } = await sb.rpc('admin_clear_regular_matches', {
+    p_game_night_id: gameNightId,
+  });
+  if (error) throw error;
+}
+
+export async function rpcInsertRegularMatch(input: {
+  gameNightId: string;
+  roundIndex: number;
+  courtIndex: number;
+  team_a_p1: string;
+  team_a_p2: string;
+  team_b_p1: string;
+  team_b_p2: string;
+  team_a_p3?: string | null;
+  team_b_p3?: string | null;
+}): Promise<string> {
+  const sb = requireSupabase();
+  const { data, error } = await sb.rpc('admin_insert_regular_match', {
+    p_game_night_id: input.gameNightId,
+    p_round_index: input.roundIndex,
+    p_court_index: input.courtIndex,
+    p_team_a_p1: input.team_a_p1,
+    p_team_a_p2: input.team_a_p2,
+    p_team_b_p1: input.team_b_p1,
+    p_team_b_p2: input.team_b_p2,
+    p_team_a_p3: input.team_a_p3 ?? null,
+    p_team_b_p3: input.team_b_p3 ?? null,
+  });
+  if (error) throw error;
+  return data as string;
+}
+
 export async function rpcSaveStageMatches(
   gameNightId: string,
   stage: 'playoffs_pool' | 'playoffs_gold' | 'playoffs_silver' | 'regular',

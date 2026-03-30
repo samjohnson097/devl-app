@@ -557,6 +557,142 @@ begin
 end;
 $$;
 
+-- Remove all regular-stage matches so organizers can backfill manually (Add match).
+-- Blocked when this night has playoff matches (round/court indices must not collide).
+drop function if exists public.admin_clear_regular_matches(uuid);
+create or replace function public.admin_clear_regular_matches(p_game_night_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+set row_security = off
+as $$
+declare
+  v_season uuid;
+begin
+  perform public.assert_authenticated();
+  select season_id into v_season from public.game_nights where id = p_game_night_id;
+  if v_season is null then raise exception 'Game night not found'; end if;
+
+  if exists (
+    select 1 from public.matches
+    where game_night_id = p_game_night_id
+      and stage in ('playoffs_pool', 'playoffs_gold', 'playoffs_silver')
+  ) then
+    raise exception
+      'This night has playoff matches. Clear or manage those from Season admin before clearing the regular schedule for manual entry.';
+  end if;
+
+  delete from public.matches
+  where game_night_id = p_game_night_id
+    and stage = 'regular';
+end;
+$$;
+
+drop function if exists public.admin_insert_regular_match(uuid, int, int, uuid, uuid, uuid, uuid, uuid, uuid);
+create or replace function public.admin_insert_regular_match(
+  p_game_night_id uuid,
+  p_round_index int,
+  p_court_index int,
+  p_team_a_p1 uuid,
+  p_team_a_p2 uuid,
+  p_team_b_p1 uuid,
+  p_team_b_p2 uuid,
+  p_team_a_p3 uuid default null,
+  p_team_b_p3 uuid default null
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+set row_security = off
+as $$
+declare
+  v_season uuid;
+  v_id uuid;
+  ids uuid[];
+begin
+  perform public.assert_authenticated();
+  select season_id into v_season from public.game_nights where id = p_game_night_id;
+  if v_season is null then raise exception 'Game night not found'; end if;
+
+  if exists (
+    select 1 from public.matches
+    where game_night_id = p_game_night_id
+      and stage in ('playoffs_pool', 'playoffs_gold', 'playoffs_silver')
+  ) then
+    raise exception
+      'This night has playoff matches. Manual add is only for league-only nights, or use Generate schedule.';
+  end if;
+
+  if p_round_index < 0 or p_court_index < 0 then
+    raise exception 'Round and court indices must be non-negative';
+  end if;
+
+  if exists (
+    select 1 from public.matches
+    where game_night_id = p_game_night_id
+      and round_index = p_round_index
+      and court_index = p_court_index
+  ) then
+    raise exception 'That round/court slot already has a match';
+  end if;
+
+  ids := array_remove(
+    array[
+      p_team_a_p1, p_team_a_p2, p_team_a_p3,
+      p_team_b_p1, p_team_b_p2, p_team_b_p3
+    ],
+    null
+  );
+  if (p_team_a_p3 is not null) <> (p_team_b_p3 is not null) then
+    raise exception '3v3 needs a third player on both teams (or leave both empty for 2v2)';
+  end if;
+
+  if cardinality(ids) < 4 then
+    raise exception 'Need at least four players (2v2 or 3v3)';
+  end if;
+
+  if p_team_a_p3 is not null and cardinality(ids) <> 6 then
+    raise exception '3v3 needs six distinct players';
+  end if;
+
+  if (
+    select count(*) from unnest(ids) as pid
+  ) <> (
+    select count(distinct pid) from unnest(ids) as pid
+  ) then
+    raise exception 'Duplicate player in match';
+  end if;
+
+  insert into public.matches (
+    game_night_id, round_index, court_index,
+    team_a_p1, team_a_p2, team_a_p3, team_b_p1, team_b_p2, team_b_p3,
+    score_a, score_b, stage, stage_round, pool_index, bracket
+  )
+  values (
+    p_game_night_id,
+    p_round_index,
+    p_court_index,
+    p_team_a_p1,
+    p_team_a_p2,
+    p_team_a_p3,
+    p_team_b_p1,
+    p_team_b_p2,
+    p_team_b_p3,
+    null,
+    null,
+    'regular',
+    p_round_index,
+    null,
+    null
+  )
+  returning id into v_id;
+
+  return v_id;
+end;
+$$;
+
 -- Grants: adjust in production (tighten table policies).
 grant usage on schema public to anon, authenticated;
 
@@ -580,6 +716,8 @@ grant execute on function public.admin_save_schedule(uuid, jsonb) to authenticat
 grant execute on function public.admin_save_stage_matches(uuid, text, jsonb) to authenticated;
 grant execute on function public.admin_set_match_score(uuid, int, int) to authenticated;
 grant execute on function public.admin_update_match_players(uuid, uuid, uuid, uuid, uuid, uuid, uuid) to authenticated;
+grant execute on function public.admin_clear_regular_matches(uuid) to authenticated;
+grant execute on function public.admin_insert_regular_match(uuid, int, int, uuid, uuid, uuid, uuid, uuid, uuid) to authenticated;
 
 revoke execute on function public.create_season(text, int, int) from anon;
 revoke execute on function public.admin_create_game_night(text, date, int) from anon;
@@ -591,6 +729,8 @@ revoke execute on function public.admin_save_schedule(uuid, jsonb) from anon;
 revoke execute on function public.admin_save_stage_matches(uuid, text, jsonb) from anon;
 revoke execute on function public.admin_set_match_score(uuid, int, int) from anon;
 revoke execute on function public.admin_update_match_players(uuid, uuid, uuid, uuid, uuid, uuid, uuid) from anon;
+revoke execute on function public.admin_clear_regular_matches(uuid) from anon;
+revoke execute on function public.admin_insert_regular_match(uuid, int, int, uuid, uuid, uuid, uuid, uuid, uuid) from anon;
 
 -- Announcements and intake windows (8 Mondays).
 create table if not exists public.announcements (

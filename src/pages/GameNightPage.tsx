@@ -7,6 +7,8 @@ import {
   fetchPlayers,
   fetchPriorMatchLikeForSeason,
   fetchSeasonBySlug,
+  rpcClearRegularMatchesForManual,
+  rpcInsertRegularMatch,
   rpcSaveSchedule,
   rpcAdminUpdateMatchPlayers,
   rpcSetAttendance,
@@ -16,7 +18,8 @@ import {
   type SeasonRow,
 } from '../api/leagueApi';
 import { buildSchedule, minimumNetsForAttendance } from '../lib/schedule';
-import { isSupabaseConfigured } from '../lib/supabase';
+import { isSupabaseConfigured, requireSupabase } from '../lib/supabase';
+import { withJwtRetry } from '../auth/sessionRefresh';
 import { ConfigBanner, Layout } from '../components/Layout';
 import { formatAppError } from '../lib/errors';
 
@@ -50,6 +53,18 @@ export function GameNightPage() {
   const [conflictRound, setConflictRound] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [manualAddOpen, setManualAddOpen] = useState(false);
+  const [manualRound, setManualRound] = useState(1);
+  const [manualCourt, setManualCourt] = useState(1);
+  const [manual3v3, setManual3v3] = useState(false);
+  const [manualPlayers, setManualPlayers] = useState({
+    a1: '',
+    a2: '',
+    a3: '',
+    b1: '',
+    b2: '',
+    b3: '',
+  });
   const [scheduleView, setScheduleView] = useState<
     'regular' | 'playoffs_pool' | 'playoffs_gold' | 'playoffs_silver'
   >('regular');
@@ -196,6 +211,14 @@ export function GameNightPage() {
     [attendingPlayersMemo]
   );
 
+  const rosterSortedForManual = useMemo(
+    () =>
+      players
+        .slice()
+        .sort((a, b) => a.display_name.localeCompare(b.display_name)),
+    [players]
+  );
+
   // If the selected slot has no player (e.g. P3), default to first attending
   // so the save button is responsive on first open.
   useEffect(() => {
@@ -324,6 +347,119 @@ export function GameNightPage() {
         return;
       }
       await rpcSaveSchedule(nightId, sched);
+      await reload();
+    } catch (er: unknown) {
+      setErr(formatAppError(er));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openManualAddModal() {
+    setErr(null);
+    const r = rosterSortedForManual;
+    setManualRound(1);
+    setManualCourt(1);
+    setManual3v3(false);
+    setManualPlayers({
+      a1: r[0]?.id ?? '',
+      a2: r[1]?.id ?? '',
+      a3: '',
+      b1: r[2]?.id ?? '',
+      b2: r[3]?.id ?? '',
+      b3: '',
+    });
+    setManualAddOpen(true);
+  }
+
+  async function clearRegularForManualEntry() {
+    if (!nightId || !season || !night) return;
+    if (hasPlayoffMatches) {
+      setErr(
+        'This night has playoff matches. Manual backfill is only for league-only nights.'
+      );
+      return;
+    }
+    const regularMs = matches.filter((m) => !m.stage || m.stage === 'regular');
+    if (
+      regularMs.some((m) => m.score_a != null || m.score_b != null) &&
+      !window.confirm(
+        'This clears every regular match and all scores for this night. Continue?'
+      )
+    ) {
+      return;
+    }
+    if (
+      regularMs.length > 0 &&
+      !window.confirm(
+        'Remove all regular matches? The court list will be empty—use Add match to enter games by hand, or Generate schedule when you want auto pairings.'
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      const sb = requireSupabase();
+      await withJwtRetry(sb, () =>
+        rpcClearRegularMatchesForManual(nightId)
+      );
+      await reload();
+    } catch (er: unknown) {
+      setErr(formatAppError(er));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitManualAddMatch() {
+    if (!nightId) return;
+    const ri = manualRound - 1;
+    const ci = manualCourt - 1;
+    if (ri < 0 || ci < 0) {
+      setErr('Round and court must be at least 1.');
+      return;
+    }
+    const p = manualPlayers;
+    const ids2 = [p.a1, p.a2, p.b1, p.b2].filter(Boolean);
+    if (manual3v3) {
+      const ids6 = [...ids2, p.a3, p.b3].filter(Boolean);
+      if (ids6.length !== 6) {
+        setErr('Choose all six players for 3v3.');
+        return;
+      }
+      if (new Set(ids6).size !== 6) {
+        setErr('All six players must be different.');
+        return;
+      }
+    } else {
+      if (ids2.length !== 4) {
+        setErr('Choose four players for 2v2.');
+        return;
+      }
+      if (new Set(ids2).size !== 4) {
+        setErr('All four players must be different.');
+        return;
+      }
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      const sb = requireSupabase();
+      await withJwtRetry(sb, () =>
+        rpcInsertRegularMatch({
+          gameNightId: nightId,
+          roundIndex: ri,
+          courtIndex: ci,
+          team_a_p1: p.a1,
+          team_a_p2: p.a2,
+          team_b_p1: p.b1,
+          team_b_p2: p.b2,
+          team_a_p3: manual3v3 ? p.a3 : null,
+          team_b_p3: manual3v3 ? p.b3 : null,
+        })
+      );
+      setManualAddOpen(false);
       await reload();
     } catch (er: unknown) {
       setErr(formatAppError(er));
@@ -522,6 +658,14 @@ export function GameNightPage() {
           favor fresh partners and opponents using the full season history.
           Regenerating wipes scores for this night.
         </p>
+        {!hasPlayoffMatches ? (
+          <p className="hint" style={{ marginTop: '0.35rem' }}>
+            Backfilling old results? Use <strong>Clear for manual entry</strong>,
+            then <strong>Add match</strong> for each game.{' '}
+            <strong>Generate schedule</strong> is still there when you want fresh
+            auto pairings.
+          </p>
+        ) : null}
         {hasPlayoffMatches ? (
           <div className="tabs" style={{ marginTop: '0.5rem' }}>
             <button
@@ -564,37 +708,63 @@ export function GameNightPage() {
         ) : null}
 
         {scheduleView === 'regular' ? (
-          <div style={{ marginTop: '0.75rem' }}>
-            <button
-              type="button"
-              className="btn primary"
-              disabled={busy}
-              onClick={() => generateSchedule()}
+          <div style={{ marginTop: '0.75rem' }} className="stack">
+            <div
+              className="actions-row"
+              style={{ flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}
             >
-              {matches.filter((m) => !m.stage || m.stage === 'regular').length
-                ? 'Regenerate schedule'
-                : 'Generate schedule'}
-            </button>
+              <button
+                type="button"
+                className="btn primary"
+                disabled={busy}
+                onClick={() => generateSchedule()}
+              >
+                {matches.filter((m) => !m.stage || m.stage === 'regular').length
+                  ? 'Regenerate schedule'
+                  : 'Generate schedule'}
+              </button>
+              {!hasPlayoffMatches ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    disabled={busy}
+                    onClick={() => void clearRegularForManualEntry()}
+                  >
+                    Clear for manual entry
+                  </button>
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    disabled={busy}
+                    onClick={() => openManualAddModal()}
+                  >
+                    Add match
+                  </button>
+                </>
+              ) : null}
+            </div>
             {matches.filter((m) => !m.stage || m.stage === 'regular').length >
             0 ? (
-              <>
+              <div
+                className="actions-row"
+                style={{ flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}
+              >
                 <button
                   type="button"
                   className="btn secondary"
                   disabled={busy}
                   onClick={saveAllScores}
-                  style={{ marginLeft: '0.6rem' }}
                 >
                   Save all entered scores
                 </button>
                 <Link
                   className="btn secondary"
-                  style={{ marginLeft: '0.6rem' }}
                   to={`/league/${slug}/admin/night/${nightId}/sheet`}
                 >
                   Share / screenshot
                 </Link>
-              </>
+              </div>
             ) : null}
           </div>
         ) : (
@@ -762,6 +932,213 @@ export function GameNightPage() {
           ))
         )}
       </section>
+
+      {manualAddOpen ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal card">
+            <div className="modal-head">
+              <h2>Add match</h2>
+              <button
+                type="button"
+                className="btn text"
+                onClick={() => {
+                  setManualAddOpen(false);
+                  setErr(null);
+                }}
+                disabled={busy}
+              >
+                Close
+              </button>
+            </div>
+            <p className="hint">
+              Use the same round and court numbers you want on the schedule
+              (Round 1 is the first round). Players can be anyone on the roster.
+            </p>
+            {err ? <p className="error">{err}</p> : null}
+            <div className="field-row">
+              <label className="field">
+                <span>Round</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={99}
+                  value={manualRound}
+                  onChange={(e) =>
+                    setManualRound(
+                      Math.max(1, Math.min(99, Number(e.target.value) || 1))
+                    )
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Court</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={12}
+                  value={manualCourt}
+                  onChange={(e) =>
+                    setManualCourt(
+                      Math.max(1, Math.min(12, Number(e.target.value) || 1))
+                    )
+                  }
+                />
+              </label>
+            </div>
+            <label className="check" style={{ marginBottom: '0.75rem' }}>
+              <input
+                type="checkbox"
+                checked={manual3v3}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  setManual3v3(on);
+                  if (!on) {
+                    setManualPlayers((prev) => ({ ...prev, a3: '', b3: '' }));
+                  }
+                }}
+                disabled={busy}
+              />
+              3v3 (six players)
+            </label>
+            <div className="stack">
+              <strong>Team A</strong>
+              <div className="field-row">
+                <label className="field">
+                  <span>Player 1</span>
+                  <select
+                    value={manualPlayers.a1}
+                    onChange={(e) =>
+                      setManualPlayers((prev) => ({
+                        ...prev,
+                        a1: e.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">—</option>
+                    {rosterSortedForManual.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.display_name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Player 2</span>
+                  <select
+                    value={manualPlayers.a2}
+                    onChange={(e) =>
+                      setManualPlayers((prev) => ({
+                        ...prev,
+                        a2: e.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">—</option>
+                    {rosterSortedForManual.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.display_name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {manual3v3 ? (
+                  <label className="field">
+                    <span>Player 3</span>
+                    <select
+                      value={manualPlayers.a3}
+                      onChange={(e) =>
+                        setManualPlayers((prev) => ({
+                          ...prev,
+                          a3: e.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">—</option>
+                      {rosterSortedForManual.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.display_name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+              </div>
+              <strong>Team B</strong>
+              <div className="field-row">
+                <label className="field">
+                  <span>Player 1</span>
+                  <select
+                    value={manualPlayers.b1}
+                    onChange={(e) =>
+                      setManualPlayers((prev) => ({
+                        ...prev,
+                        b1: e.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">—</option>
+                    {rosterSortedForManual.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.display_name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Player 2</span>
+                  <select
+                    value={manualPlayers.b2}
+                    onChange={(e) =>
+                      setManualPlayers((prev) => ({
+                        ...prev,
+                        b2: e.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">—</option>
+                    {rosterSortedForManual.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.display_name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {manual3v3 ? (
+                  <label className="field">
+                    <span>Player 3</span>
+                    <select
+                      value={manualPlayers.b3}
+                      onChange={(e) =>
+                        setManualPlayers((prev) => ({
+                          ...prev,
+                          b3: e.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">—</option>
+                      {rosterSortedForManual.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.display_name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+              </div>
+            </div>
+            <div className="actions-row">
+              <button
+                type="button"
+                className="btn primary"
+                disabled={busy}
+                onClick={() => void submitManualAddMatch()}
+              >
+                {busy ? 'Saving…' : 'Add match'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {editing
         ? (() => {
