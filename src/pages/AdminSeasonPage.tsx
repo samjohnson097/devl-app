@@ -15,6 +15,7 @@ import {
   rpcAdminAddPlayer,
   rpcAdminCreateGameNight,
   rpcAdminDeleteAnnouncement,
+  rpcAdminSetSeasonHideFromPublic,
   rpcAdminRemovePlayer,
   rpcAdminCancelAndShiftIntakeWeek,
   rpcAdminSetIntakeMondays,
@@ -84,6 +85,8 @@ export function AdminSeasonPage() {
   >([]);
   const [defaultSeasonDraft, setDefaultSeasonDraft] = useState<string>('');
   const [defaultSeasonSaved, setDefaultSeasonSaved] = useState(false);
+  const [hideFromPublic, setHideFromPublic] = useState(false);
+  const [hideFromPublicBusy, setHideFromPublicBusy] = useState(false);
 
   const playoffDateStorageKey = useMemo(
     () => (season?.id ? `devl:playoffDate:${season.id}` : null),
@@ -106,6 +109,7 @@ export function AdminSeasonPage() {
     const s = await fetchSeasonBySlug(slug);
     setSeason(s);
     if (!s) return;
+    setHideFromPublic(!!s.hide_from_public);
     const [pl, gn, matches, anns, mondays, feedback] = await Promise.all([
       fetchPlayers(s.id),
       fetchGameNights(s.id),
@@ -304,6 +308,23 @@ export function AdminSeasonPage() {
     if (!session?.user?.id) return;
     setDefaultSeasonSlug(session.user.id, defaultSeasonDraft.trim() || null);
     setDefaultSeasonSaved(true);
+  }
+
+  async function saveSeasonVisibility() {
+    if (!slug) return;
+    setHideFromPublicBusy(true);
+    setErr(null);
+    try {
+      const sb = requireSupabase();
+      await withJwtRetry(sb, () =>
+        rpcAdminSetSeasonHideFromPublic(slug, hideFromPublic)
+      );
+      await reload();
+    } catch (er: unknown) {
+      setErr(formatAppError(er));
+    } finally {
+      setHideFromPublicBusy(false);
+    }
   }
 
   useEffect(() => {
@@ -1147,6 +1168,34 @@ export function AdminSeasonPage() {
             ) : (
               <p className="muted">Sign in to set your default season.</p>
             )}
+          </section>
+          <section className="card">
+            <h2>Public home page</h2>
+            <p className="hint">
+              Logged-out visitors normally see every season on the league home
+              page. Turn this on to hide only this season from them (standings,
+              recap, announcements). The player join link still works for anyone
+              who has the URL.
+            </p>
+            <div className="stack">
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={hideFromPublic}
+                  onChange={(e) => setHideFromPublic(e.target.checked)}
+                  disabled={hideFromPublicBusy || busy}
+                />
+                Hide this season from logged-out visitors
+              </label>
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={hideFromPublicBusy || busy}
+                onClick={() => void saveSeasonVisibility()}
+              >
+                {hideFromPublicBusy ? 'Saving…' : 'Save visibility'}
+              </button>
+            </div>
           </section>
           <section className="card">
             <h2>Announcements</h2>

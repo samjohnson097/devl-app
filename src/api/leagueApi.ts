@@ -10,6 +10,8 @@ export interface SeasonRow {
   games_per_night: number;
   primary_play_day: string;
   created_at: string;
+  /** When true, anon users cannot list or read this season (join link still works). */
+  hide_from_public?: boolean;
 }
 
 export interface AnnouncementRow {
@@ -174,6 +176,34 @@ export async function rpcSubmitLeagueFeedback(
   return data as string;
 }
 
+/** Public join page only: anon cannot read season tables directly. */
+export type IntakeFormData = {
+  season_name: string;
+  monday_dates: string[];
+};
+
+export async function rpcGetIntakeFormData(
+  seasonSlug: string
+): Promise<IntakeFormData | null> {
+  const sb = requireSupabase();
+  const { data, error } = await sb.rpc('get_intake_form_data', {
+    p_season_slug: seasonSlug,
+  });
+  if (error) throw error;
+  if (data == null) return null;
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row || typeof row !== 'object') return null;
+  const r = row as { season_name?: string; monday_dates?: unknown };
+  if (typeof r.season_name !== 'string') return null;
+  const raw = r.monday_dates;
+  const monday_dates: string[] = Array.isArray(raw)
+    ? raw.map((d) =>
+        typeof d === 'string' ? d.slice(0, 10) : String(d).slice(0, 10)
+      )
+    : [];
+  return { season_name: r.season_name, monday_dates };
+}
+
 export async function fetchSeasonIntakeMondays(
   seasonId: string
 ): Promise<SeasonIntakeMondayRow[]> {
@@ -262,6 +292,18 @@ export async function rpcAdminDeleteAnnouncement(
   const sb = requireSupabase();
   const { error } = await sb.rpc('admin_delete_announcement', {
     p_announcement_id: announcementId,
+  });
+  if (error) throw error;
+}
+
+export async function rpcAdminSetSeasonHideFromPublic(
+  seasonSlug: string,
+  hide: boolean
+): Promise<void> {
+  const sb = requireSupabase();
+  const { error } = await sb.rpc('admin_set_season_hide_from_public', {
+    p_season_slug: seasonSlug,
+    p_hide: hide,
   });
   if (error) throw error;
 }

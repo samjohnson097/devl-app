@@ -15,6 +15,9 @@ create table if not exists public.seasons (
   created_at timestamptz not null default now()
 );
 
+alter table public.seasons
+  add column if not exists hide_from_public boolean not null default false;
+
 create table if not exists public.season_secrets (
   season_id uuid primary key references public.seasons (id) on delete cascade,
   admin_token uuid not null default gen_random_uuid()
@@ -557,6 +560,7 @@ $$;
 -- Grants: adjust in production (tighten table policies).
 grant usage on schema public to anon, authenticated;
 
+-- League tables: anon + authenticated may SELECT; RLS hides rows for seasons with hide_from_public.
 grant select on public.seasons to anon, authenticated;
 grant select on public.players to anon, authenticated;
 grant select on public.game_nights to anon, authenticated;
@@ -802,6 +806,27 @@ begin
 end;
 $$;
 
+drop function if exists public.admin_set_season_hide_from_public(text, boolean);
+create or replace function public.admin_set_season_hide_from_public(
+  p_season_slug text,
+  p_hide boolean
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+set row_security = off
+as $$
+declare
+  v_season uuid;
+begin
+  perform public.assert_authenticated();
+  select id into v_season from public.seasons where slug = p_season_slug;
+  if v_season is null then raise exception 'Season not found'; end if;
+  update public.seasons set hide_from_public = p_hide where id = v_season;
+end;
+$$;
+
 drop function if exists public.submit_league_feedback(text, text);
 create or replace function public.submit_league_feedback(
   p_season_slug text,
@@ -815,11 +840,16 @@ set row_security = off
 as $$
 declare
   v_season uuid;
+  v_hide boolean;
   v_id uuid;
   v_msg text;
 begin
-  select id into v_season from public.seasons where slug = p_season_slug;
+  select id, hide_from_public into v_season, v_hide
+  from public.seasons where slug = p_season_slug;
   if v_season is null then raise exception 'Season not found'; end if;
+  if auth.uid() is null and coalesce(v_hide, false) then
+    raise exception 'Season not found';
+  end if;
   v_msg := trim(p_message);
   if length(v_msg) < 1 then raise exception 'Message required'; end if;
   if length(v_msg) > 2000 then raise exception 'Message too long'; end if;
@@ -830,15 +860,41 @@ begin
 end;
 $$;
 
+-- Minimal season + intake dates for the public join URL (anon cannot read tables directly).
+drop function if exists public.get_intake_form_data(text);
+create or replace function public.get_intake_form_data(p_season_slug text)
+returns table (
+  season_name text,
+  monday_dates date[]
+)
+language sql
+security definer
+set search_path = public
+set row_security = off
+as $$
+  select s.name,
+         coalesce(
+           array_agg(m.monday_date order by m.display_order)
+             filter (where m.monday_date is not null),
+           '{}'::date[]
+         )
+  from public.seasons s
+  left join public.season_intake_mondays m on m.season_id = s.id
+  where s.slug = p_season_slug
+  group by s.id, s.name;
+$$;
+
 grant select on public.announcements to anon, authenticated;
 grant select on public.season_intake_mondays to anon, authenticated;
 grant select on public.player_monday_availability to anon, authenticated;
 
 grant execute on function public.register_player_with_monday_availability(text, text, text, jsonb) to anon, authenticated;
+grant execute on function public.get_intake_form_data(text) to anon, authenticated;
 grant execute on function public.create_season_with_mondays(text, int, int, date) to authenticated;
 grant execute on function public.admin_set_intake_mondays(text, jsonb) to authenticated;
 grant execute on function public.admin_add_announcement(text, text) to authenticated;
 grant execute on function public.admin_delete_announcement(uuid) to authenticated;
+grant execute on function public.admin_set_season_hide_from_public(text, boolean) to authenticated;
 
 grant select on public.league_feedback to authenticated;
 revoke all on table public.league_feedback from anon;
@@ -848,6 +904,7 @@ revoke execute on function public.create_season_with_mondays(text, int, int, dat
 revoke execute on function public.admin_set_intake_mondays(text, jsonb) from anon;
 revoke execute on function public.admin_add_announcement(text, text) from anon;
 revoke execute on function public.admin_delete_announcement(uuid) from anon;
+revoke execute on function public.admin_set_season_hide_from_public(text, boolean) from anon;
 
 -- Cancel one intake/play week: remove that Monday, shift all later Mondays by +7 days,
 -- add a new 8th Monday at the end. Per-player Monday availability for the shifted and
@@ -954,4 +1011,115 @@ $$;
 grant execute on function public.admin_cancel_and_shift_intake_week(date, text) to authenticated;
 revoke execute on function public.admin_cancel_and_shift_intake_week(date, text) from anon;
 
--- Optional: enable RLS later and replace broad grants with policies + service role for secrets.
+-- Row level security: logged-out (anon) users only see seasons where hide_from_public is false.
+-- Logged-in users see all seasons. Join links still work via get_intake_form_data (security definer).
+alter table public.seasons enable row level security;
+alter table public.players enable row level security;
+alter table public.game_nights enable row level security;
+alter table public.matches enable row level security;
+alter table public.attendance enable row level security;
+alter table public.announcements enable row level security;
+alter table public.season_intake_mondays enable row level security;
+alter table public.player_monday_availability enable row level security;
+alter table public.league_feedback enable row level security;
+
+drop policy if exists "seasons_select_anon" on public.seasons;
+drop policy if exists "seasons_select_authenticated" on public.seasons;
+create policy "seasons_select_anon" on public.seasons
+  for select to anon
+  using (not hide_from_public);
+create policy "seasons_select_authenticated" on public.seasons
+  for select to authenticated
+  using (true);
+
+drop policy if exists "players_select_anon" on public.players;
+drop policy if exists "players_select_authenticated" on public.players;
+create policy "players_select_anon" on public.players
+  for select to anon
+  using (exists (
+    select 1 from public.seasons s
+    where s.id = players.season_id and not s.hide_from_public
+  ));
+create policy "players_select_authenticated" on public.players
+  for select to authenticated
+  using (true);
+
+drop policy if exists "game_nights_select_anon" on public.game_nights;
+drop policy if exists "game_nights_select_authenticated" on public.game_nights;
+create policy "game_nights_select_anon" on public.game_nights
+  for select to anon
+  using (exists (
+    select 1 from public.seasons s
+    where s.id = game_nights.season_id and not s.hide_from_public
+  ));
+create policy "game_nights_select_authenticated" on public.game_nights
+  for select to authenticated
+  using (true);
+
+drop policy if exists "matches_select_anon" on public.matches;
+drop policy if exists "matches_select_authenticated" on public.matches;
+create policy "matches_select_anon" on public.matches
+  for select to anon
+  using (exists (
+    select 1 from public.game_nights gn
+    join public.seasons s on s.id = gn.season_id
+    where gn.id = matches.game_night_id and not s.hide_from_public
+  ));
+create policy "matches_select_authenticated" on public.matches
+  for select to authenticated
+  using (true);
+
+drop policy if exists "attendance_select_anon" on public.attendance;
+drop policy if exists "attendance_select_authenticated" on public.attendance;
+create policy "attendance_select_anon" on public.attendance
+  for select to anon
+  using (exists (
+    select 1 from public.game_nights gn
+    join public.seasons s on s.id = gn.season_id
+    where gn.id = attendance.game_night_id and not s.hide_from_public
+  ));
+create policy "attendance_select_authenticated" on public.attendance
+  for select to authenticated
+  using (true);
+
+drop policy if exists "announcements_select_anon" on public.announcements;
+drop policy if exists "announcements_select_authenticated" on public.announcements;
+create policy "announcements_select_anon" on public.announcements
+  for select to anon
+  using (exists (
+    select 1 from public.seasons s
+    where s.id = announcements.season_id and not s.hide_from_public
+  ));
+create policy "announcements_select_authenticated" on public.announcements
+  for select to authenticated
+  using (true);
+
+drop policy if exists "season_intake_mondays_select_anon" on public.season_intake_mondays;
+drop policy if exists "season_intake_mondays_select_authenticated" on public.season_intake_mondays;
+create policy "season_intake_mondays_select_anon" on public.season_intake_mondays
+  for select to anon
+  using (exists (
+    select 1 from public.seasons s
+    where s.id = season_intake_mondays.season_id and not s.hide_from_public
+  ));
+create policy "season_intake_mondays_select_authenticated" on public.season_intake_mondays
+  for select to authenticated
+  using (true);
+
+drop policy if exists "player_monday_availability_select_anon" on public.player_monday_availability;
+drop policy if exists "player_monday_availability_select_authenticated" on public.player_monday_availability;
+create policy "player_monday_availability_select_anon" on public.player_monday_availability
+  for select to anon
+  using (exists (
+    select 1 from public.players p
+    join public.seasons s on s.id = p.season_id
+    where p.id = player_monday_availability.player_id and not s.hide_from_public
+  ));
+create policy "player_monday_availability_select_authenticated" on public.player_monday_availability
+  for select to authenticated
+  using (true);
+
+drop policy if exists "league_feedback_select_authenticated" on public.league_feedback;
+create policy "league_feedback_select_authenticated" on public.league_feedback
+  for select to authenticated
+  using (true);

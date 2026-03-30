@@ -43,7 +43,7 @@ function sortMatchesForDisplay(matches: MatchRow[]): MatchRow[] {
 }
 
 export function HomePage() {
-  const { session, signOut } = useAuth();
+  const { session, signOut, loading: authLoading } = useAuth();
   const [seasons, setSeasons] = useState<
     Array<{ id: string; slug: string; name: string }>
   >([]);
@@ -73,7 +73,7 @@ export function HomePage() {
   const [feedbackErr, setFeedbackErr] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isSupabaseConfigured) return;
+    if (!isSupabaseConfigured || authLoading) return;
     (async () => {
       try {
         const sb = requireSupabase();
@@ -83,10 +83,13 @@ export function HomePage() {
         setErr(formatAppError(er));
       }
     })();
-  }, []);
+  }, [authLoading, session?.user?.id]);
 
   useEffect(() => {
-    if (seasons.length === 0) return;
+    if (seasons.length === 0) {
+      setSelectedSlug('');
+      return;
+    }
     const uid = session?.user?.id;
     if (uid) {
       const saved = getDefaultSeasonSlug(uid);
@@ -244,7 +247,7 @@ export function HomePage() {
       setCreated({ slug: row.slug });
       setName('');
       setFirstMonday('');
-      const list = await fetchSeasons();
+      const list = await withJwtRetry(sb, () => fetchSeasons());
       setSeasons(list.map((s) => ({ id: s.id, slug: s.slug, name: s.name })));
       if (row.slug) setSelectedSlug(row.slug);
     } catch (er: unknown) {
@@ -263,27 +266,42 @@ export function HomePage() {
       <div className="home-grid">
         <aside className="sidebar card">
           <h2>League menu</h2>
-          <label className="field">
-            <span>Season</span>
-            <select
-              value={selectedSlug}
-              onChange={(e) => setSelectedSlug(e.target.value)}
-            >
-              {seasons.map((s) => (
-                <option key={s.id} value={s.slug}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          {selectedSlug ? (
-            <div className="stack">
-              <label className="label">New player intake form</label>
-              <Link className="btn secondary" to={`/league/${selectedSlug}/join`}>
-                Open intake form
-              </Link>
-            </div>
-          ) : null}
+          {authLoading ? (
+            <p className="muted">Loading…</p>
+          ) : (
+            <>
+              <label className="field">
+                <span>Season</span>
+                <select
+                  value={selectedSlug}
+                  onChange={(e) => setSelectedSlug(e.target.value)}
+                  disabled={seasons.length === 0}
+                >
+                  {seasons.map((s) => (
+                    <option key={s.id} value={s.slug}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {seasons.length === 0 ? (
+                <p className="muted" style={{ marginTop: '0.5rem' }}>
+                  No seasons visible yet{session ? '.' : ' (sign in to see hidden seasons).'}
+                </p>
+              ) : null}
+              {selectedSlug ? (
+                <div className="stack">
+                  <label className="label">New player intake form</label>
+                  <Link
+                    className="btn secondary"
+                    to={`/league/${selectedSlug}/join`}
+                  >
+                    Open intake form
+                  </Link>
+                </div>
+              ) : null}
+            </>
+          )}
           <div className="divider" />
           {session ? (
             <>
@@ -359,33 +377,53 @@ export function HomePage() {
         </aside>
 
         <div className="main-column">
-          {created ? (
-            <section className="card success-card">
-              <h2>Season created</h2>
-              <p className="muted">
-                Share the intake link with players. Manage the season from the
-                organizer dashboard (signed in).
-              </p>
-              <div className="stack">
-                <label className="label">Player intake</label>
-                <Link
-                  className="link-block"
-                  to={`/league/${created.slug}/join`}
-                >{`${window.location.origin}/league/${created.slug}/join`}</Link>
-              </div>
-              <p className="actions-row">
-                <Link
-                  className="btn secondary"
-                  to={`/league/${created.slug}/admin`}
-                >
-                  Open season admin
-                </Link>
-              </p>
-            </section>
-          ) : null}
+          {authLoading ? (
+            <p className="muted">Loading…</p>
+          ) : (
+            <>
+              {created ? (
+                <section className="card success-card">
+                  <h2>Season created</h2>
+                  <p className="muted">
+                    Share the intake link with players. Manage the season from
+                    the organizer dashboard (signed in).
+                  </p>
+                  <div className="stack">
+                    <label className="label">Player intake</label>
+                    <Link
+                      className="link-block"
+                      to={`/league/${created.slug}/join`}
+                    >{`${window.location.origin}/league/${created.slug}/join`}</Link>
+                  </div>
+                  <p className="actions-row">
+                    <Link
+                      className="btn secondary"
+                      to={`/league/${created.slug}/admin`}
+                    >
+                      Open season admin
+                    </Link>
+                  </p>
+                </section>
+              ) : null}
 
-          {err ? <p className="error">{err}</p> : null}
-          <section className="card">
+              {err ? <p className="error">{err}</p> : null}
+              {seasons.length === 0 && !session ? (
+                <section className="card">
+                  <h2>League home</h2>
+                  <p className="muted">
+                    There are no public seasons right now, or you need to sign in
+                    to see seasons hidden from logged-out visitors.
+                  </p>
+                  <p className="actions-row">
+                    <Link className="btn secondary" to="/admin/login">
+                      Organizer sign in
+                    </Link>
+                  </p>
+                </section>
+              ) : null}
+              {seasons.length === 0 ? null : (
+                <>
+              <section className="card">
             <h2>Announcements</h2>
             {announcements.length === 0 ? (
               <p className="muted">No announcements yet.</p>
@@ -483,8 +521,8 @@ export function HomePage() {
           <section className="card">
             <h2>Feedback</h2>
             <p className="muted" style={{ marginTop: 0 }}>
-              Send anonymous feedback to the organizers for the season selected
-              above. You do not need to sign in.
+              Send feedback to the organizers for the season selected above.
+              Your message is stored without your name.
             </p>
             {!selectedSlug ? (
               <p className="muted">Choose a season from the menu to send feedback.</p>
@@ -527,6 +565,10 @@ export function HomePage() {
               </form>
             )}
           </section>
+                </>
+              )}
+            </>
+          )}
         </div>
       </div>
     </Layout>

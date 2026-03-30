@@ -1,18 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import {
-  fetchSeasonBySlug,
-  fetchSeasonIntakeMondays,
-  rpcRegisterPlayer,
-} from '../api/leagueApi';
+import { rpcGetIntakeFormData, rpcRegisterPlayer } from '../api/leagueApi';
 import { isSupabaseConfigured } from '../lib/supabase';
-import type { SeasonRow } from '../api/leagueApi';
 import { ConfigBanner, Layout } from '../components/Layout';
 import { formatAppError } from '../lib/errors';
 
 export function IntakePage() {
   const { slug } = useParams<{ slug: string }>();
-  const [season, setSeason] = useState<SeasonRow | null | undefined>(undefined);
+  /** undefined = loading, null = not found */
+  const [seasonName, setSeasonName] = useState<string | null | undefined>(
+    undefined
+  );
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [mondays, setMondays] = useState<string[]>([]);
@@ -26,18 +24,22 @@ export function IntakePage() {
     let cancelled = false;
     (async () => {
       try {
-        const s = await fetchSeasonBySlug(slug);
-        if (!cancelled) setSeason(s);
-        if (s && !cancelled) {
-          const dates = await fetchSeasonIntakeMondays(s.id);
-          const dayList = dates.map((d) => d.monday_date);
-          setMondays(dayList);
-          const next: Record<string, boolean> = {};
-          for (const d of dayList) next[d] = false;
-          setAvailability(next);
+        const row = await rpcGetIntakeFormData(slug);
+        if (cancelled) return;
+        if (!row) {
+          setSeasonName(null);
+          setMondays([]);
+          setAvailability({});
+          return;
         }
+        setSeasonName(row.season_name);
+        const dayList = row.monday_dates;
+        setMondays(dayList);
+        const next: Record<string, boolean> = {};
+        for (const d of dayList) next[d] = false;
+        setAvailability(next);
       } catch {
-        if (!cancelled) setSeason(null);
+        if (!cancelled) setSeasonName(null);
       }
     })();
     return () => {
@@ -86,7 +88,7 @@ export function IntakePage() {
     );
   }
 
-  if (season === undefined) {
+  if (seasonName === undefined) {
     return (
       <Layout title="Join league">
         <p className="muted">Loading…</p>
@@ -94,7 +96,7 @@ export function IntakePage() {
     );
   }
 
-  if (season === null) {
+  if (seasonName === null) {
     return (
       <Layout title="Join league">
         <p>This season link is not valid.</p>
@@ -104,7 +106,7 @@ export function IntakePage() {
 
   return (
     <Layout
-      title={`Join — ${season.name}`}
+      title={`Join — ${seasonName}`}
       subtitle="Tell us your availability for the next 8 Mondays."
     >
       {done ? (
