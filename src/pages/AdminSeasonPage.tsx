@@ -32,7 +32,8 @@ import {
   selectBracketSeedsFromPools,
 } from '../lib/playoffs';
 import { computeStandings, rankPlayerIdsForPlayoffSeeding } from '../lib/standings';
-import { isSupabaseConfigured } from '../lib/supabase';
+import { isSupabaseConfigured, requireSupabase } from '../lib/supabase';
+import { withJwtRetry } from '../auth/sessionRefresh';
 import { ConfigBanner, Layout } from '../components/Layout';
 import { formatAppError } from '../lib/errors';
 import { formatOrdinalLongDate } from '../lib/dates';
@@ -114,6 +115,23 @@ export function AdminSeasonPage() {
     setAnnouncements(anns);
     setIntakeMondays(mondays);
     setStandings(computeStandings(pl, matches));
+    try {
+      const sb = requireSupabase();
+      const seasonsList = await withJwtRetry(sb, () => fetchSeasons());
+      setAllSeasons(
+        seasonsList.map((row) => ({
+          id: row.id,
+          slug: row.slug,
+          name: row.name,
+        }))
+      );
+    } catch {
+      setAllSeasons((prev) =>
+        prev.length > 0
+          ? prev
+          : [{ id: s.id, slug: s.slug, name: s.name }]
+      );
+    }
   }, [slug]);
 
   useEffect(() => {
@@ -253,19 +271,13 @@ export function AdminSeasonPage() {
     }
   }
 
-  useEffect(() => {
-    if (tab !== 'settings' || !isSupabaseConfigured) return;
-    void (async () => {
-      try {
-        const list = await fetchSeasons();
-        setAllSeasons(
-          list.map((s) => ({ id: s.id, slug: s.slug, name: s.name }))
-        );
-      } catch {
-        setAllSeasons([]);
-      }
-    })();
-  }, [tab]);
+  const seasonsForDefaultPicker = useMemo(() => {
+    const list = allSeasons.slice();
+    if (season && !list.some((x) => x.id === season.id)) {
+      list.unshift({ id: season.id, slug: season.slug, name: season.name });
+    }
+    return list;
+  }, [allSeasons, season]);
 
   useEffect(() => {
     if (tab !== 'settings' || !session?.user?.id) return;
@@ -275,13 +287,13 @@ export function AdminSeasonPage() {
   }, [tab, session?.user?.id, slug]);
 
   useEffect(() => {
-    if (tab !== 'settings' || allSeasons.length === 0) return;
+    if (tab !== 'settings' || seasonsForDefaultPicker.length === 0) return;
     setDefaultSeasonDraft((prev) =>
-      allSeasons.some((s) => s.slug === prev)
+      seasonsForDefaultPicker.some((s) => s.slug === prev)
         ? prev
-        : slug ?? allSeasons[0].slug
+        : slug ?? seasonsForDefaultPicker[0].slug
     );
-  }, [allSeasons, tab, slug]);
+  }, [seasonsForDefaultPicker, tab, slug]);
 
   function saveDefaultSeasonPreference() {
     if (!session?.user?.id) return;
@@ -654,10 +666,11 @@ export function AdminSeasonPage() {
     .filter((n) => intakeDateSet.has(n.night_date))
     .sort((a, b) => a.night_date.localeCompare(b.night_date));
   const scheduledNightDates = new Set(nights.map((n) => n.night_date));
-  const todayIso = new Date().toISOString().slice(0, 10);
-  const futureMondays = intakeMondays
+  /** Intake Mondays that do not yet have a game night (includes past dates for retroactive setup). */
+  const intakeMondaysNeedingNight = intakeMondays
     .map((m) => m.monday_date)
-    .filter((d) => d >= todayIso && !scheduledNightDates.has(d));
+    .filter((d) => !scheduledNightDates.has(d))
+    .sort((a, b) => a.localeCompare(b));
 
   return (
     <Layout
@@ -750,16 +763,18 @@ export function AdminSeasonPage() {
         <section className="card">
           <h2>Game nights</h2>
           <p className="hint">
-            One-click create nights from your configured Monday schedule.
-            Match generation auto-sizes courts based on who is attending.
+            Create nights from your eight intake Mondays. Past Mondays stay listed
+            until a night exists so you can add them retroactively. Match generation
+            auto-sizes courts based on who is attending.
           </p>
           <div className="stack" style={{ marginBottom: '1rem' }}>
-            {futureMondays.length === 0 ? (
+            {intakeMondaysNeedingNight.length === 0 ? (
               <p className="muted">
-                No future Mondays configured. Update them in Settings.
+                Every intake Monday already has a game night, or configure Mondays
+                in Settings.
               </p>
             ) : (
-              futureMondays.map((date) => (
+              intakeMondaysNeedingNight.map((date) => (
                 <div key={date} className="list-row">
                   <span>{formatOrdinalLongDate(date)}</span>
                   <button
@@ -1103,7 +1118,7 @@ export function AdminSeasonPage() {
                       setDefaultSeasonSaved(false);
                     }}
                   >
-                    {allSeasons.map((s) => (
+                    {seasonsForDefaultPicker.map((s) => (
                       <option key={s.id} value={s.slug}>
                         {s.name}
                       </option>
@@ -1113,7 +1128,7 @@ export function AdminSeasonPage() {
                 <button
                   type="button"
                   className="btn primary"
-                  disabled={busy || allSeasons.length === 0}
+                  disabled={busy || seasonsForDefaultPicker.length === 0}
                   onClick={saveDefaultSeasonPreference}
                 >
                   Save default season
