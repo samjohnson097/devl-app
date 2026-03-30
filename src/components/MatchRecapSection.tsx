@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import type { MatchRow } from '../api/leagueApi';
 import { formatOrdinalLongDate, weekdayLong } from '../lib/dates';
+import { computeStandings } from '../lib/standings';
 
 export type NightRecap = { id: string; date: string; matches: MatchRow[] };
 
@@ -45,9 +46,22 @@ function NightRoundCarousel({
   );
   const [slide, setSlide] = useState(0);
 
-  const maxIdx = Math.max(0, rounds.length - 1);
+  const weekStandings = useMemo(() => {
+    const players = Array.from(nameById.entries()).map(([id, display_name]) => ({
+      id,
+      display_name,
+    }));
+    const rows = computeStandings(players, night.matches);
+    return rows.filter((r) => r.wins + r.losses > 0);
+  }, [nameById, night.matches]);
+
+  const slideCount = rounds.length + 1; // +1 for week standings
+  const maxIdx = Math.max(0, slideCount - 1);
   const currentIdx = Math.min(Math.max(0, slide), maxIdx);
-  const roundNum = rounds[currentIdx];
+
+  const isStandingsSlide = currentIdx === 0;
+  const roundIdx = Math.max(0, currentIdx - 1);
+  const roundNum = rounds[roundIdx];
   const roundMatches = roundNum !== undefined ? byRound.get(roundNum) ?? [] : [];
 
   const go = (delta: number) => {
@@ -68,9 +82,9 @@ function NightRoundCarousel({
       ) : (
         <div className="recap-carousel">
           <div
-            className={`recap-carousel-toolbar${rounds.length <= 1 ? ' recap-carousel-toolbar--solo' : ''}`}
+            className={`recap-carousel-toolbar${slideCount <= 1 ? ' recap-carousel-toolbar--solo' : ''}`}
           >
-            {rounds.length > 1 ? (
+            {slideCount > 1 ? (
               <>
                 <button
                   type="button"
@@ -82,8 +96,23 @@ function NightRoundCarousel({
                 </button>
                 <div className="recap-carousel-label" aria-live="polite">
                   <span className="recap-carousel-round">
-                    Round {currentIdx + 1}
-                    <span className="recap-carousel-of"> / {rounds.length}</span>
+                    {isStandingsSlide ? (
+                      <>
+                        Week standings
+                        <span className="recap-carousel-of">
+                          {' '}
+                          / {slideCount}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        Round {roundIdx + 1}
+                        <span className="recap-carousel-of">
+                          {' '}
+                          / {rounds.length}
+                        </span>
+                      </>
+                    )}
                   </span>
                 </div>
                 <button
@@ -98,70 +127,102 @@ function NightRoundCarousel({
             ) : (
               <div className="recap-carousel-label" aria-live="polite">
                 <span className="recap-carousel-round">
-                  Round 1
+                  Week standings
                   <span className="recap-carousel-of"> / 1</span>
                 </span>
               </div>
             )}
           </div>
 
-          {rounds.length > 1 ? (
+          {slideCount > 1 ? (
             <div className="recap-carousel-dots" role="tablist" aria-label="Rounds">
-              {rounds.map((r, i) => (
+              {Array.from({ length: slideCount }).map((_, i) => (
                 <button
-                  key={r}
+                  key={i === 0 ? 'standings' : rounds[i - 1] ?? i}
                   type="button"
                   role="tab"
                   aria-selected={i === currentIdx}
                   className={`recap-dot${i === currentIdx ? ' recap-dot--active' : ''}`}
                   onClick={() => setSlide(i)}
-                  aria-label={`Round ${i + 1}`}
+                  aria-label={i === 0 ? 'Week standings' : `Round ${i}`}
                 />
               ))}
             </div>
           ) : null}
 
           <div className="recap-round-pane">
-            <ul className="recap-match-grid">
-              {roundMatches.map((m) => {
-                const teamA = teamLabel(
-                  [m.team_a_p1, m.team_a_p2, m.team_a_p3],
-                  nameById
-                );
-                const teamB = teamLabel(
-                  [m.team_b_p1, m.team_b_p2, m.team_b_p3],
-                  nameById
-                );
-                const scored =
-                  m.score_a != null && m.score_b != null;
-                return (
-                  <li key={m.id} className="recap-match-card">
-                    <div className="recap-court-badge">
-                      Court {m.court_index + 1}
-                    </div>
-                    <div className="recap-match-teams">
-                      <div className="recap-team recap-team--a">
-                        <span className="recap-team-label">{teamA}</span>
+            {isStandingsSlide ? (
+              weekStandings.length === 0 ? (
+                <p className="muted recap-night-empty">
+                  No saved scores yet for this week.
+                </p>
+              ) : (
+                <div className="table-wrap">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Player</th>
+                        <th>W</th>
+                        <th>L</th>
+                        <th>+/-</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {weekStandings.map((row) => (
+                        <tr key={row.playerId}>
+                          <td>{row.name}</td>
+                          <td>{row.wins}</td>
+                          <td>{row.losses}</td>
+                          <td>
+                            {row.pointDiff > 0 ? `+${row.pointDiff}` : row.pointDiff}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            ) : (
+              <ul className="recap-match-grid">
+                {roundMatches.map((m) => {
+                  const teamA = teamLabel(
+                    [m.team_a_p1, m.team_a_p2, m.team_a_p3],
+                    nameById
+                  );
+                  const teamB = teamLabel(
+                    [m.team_b_p1, m.team_b_p2, m.team_b_p3],
+                    nameById
+                  );
+                  const scored = m.score_a != null && m.score_b != null;
+                  return (
+                    <li key={m.id} className="recap-match-card">
+                      <div className="recap-court-badge">
+                        Court {m.court_index + 1}
                       </div>
-                      <div className="recap-score-slot">
-                        {scored ? (
-                          <div className="recap-score-pill" aria-label="Score">
-                            <span className="recap-score-num">{m.score_a}</span>
-                            <span className="recap-score-sep">–</span>
-                            <span className="recap-score-num">{m.score_b}</span>
-                          </div>
-                        ) : (
-                          <span className="recap-score-pending">vs</span>
-                        )}
+                      <div className="recap-match-teams">
+                        <div className="recap-team recap-team--a">
+                          <span className="recap-team-label">{teamA}</span>
+                        </div>
+                        <div className="recap-score-slot">
+                          {scored ? (
+                            <div className="recap-score-pill" aria-label="Score">
+                              <span className="recap-score-num">{m.score_a}</span>
+                              <span className="recap-score-sep">–</span>
+                              <span className="recap-score-num">{m.score_b}</span>
+                            </div>
+                          ) : (
+                            <span className="recap-score-pending">vs</span>
+                          )}
+                        </div>
+                        <div className="recap-team recap-team--b">
+                          <span className="recap-team-label">{teamB}</span>
+                        </div>
                       </div>
-                      <div className="recap-team recap-team--b">
-                        <span className="recap-team-label">{teamB}</span>
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
         </div>
       )}
