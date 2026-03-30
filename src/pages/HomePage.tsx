@@ -24,6 +24,7 @@ import {
   weekdayLong,
 } from '../lib/dates';
 import { computeStandings } from '../lib/standings';
+import { getDefaultSeasonSlug } from '../lib/adminPreferences';
 
 type IntakeDateRow = {
   iso: string;
@@ -73,14 +74,26 @@ export function HomePage() {
         const sb = requireSupabase();
         const list = await withJwtRetry(sb, () => fetchSeasons());
         setSeasons(list.map((s) => ({ id: s.id, slug: s.slug, name: s.name })));
-        if (list.length > 0) {
-          setSelectedSlug((prev) => prev || list[0].slug);
-        }
       } catch (er: unknown) {
         setErr(formatAppError(er));
       }
     })();
   }, []);
+
+  useEffect(() => {
+    if (seasons.length === 0) return;
+    const uid = session?.user?.id;
+    if (uid) {
+      const saved = getDefaultSeasonSlug(uid);
+      if (saved && seasons.some((s) => s.slug === saved)) {
+        setSelectedSlug(saved);
+        return;
+      }
+    }
+    setSelectedSlug((prev) =>
+      prev && seasons.some((s) => s.slug === prev) ? prev : seasons[0].slug
+    );
+  }, [seasons, session?.user?.id]);
 
   const reloadSelectedSeason = useCallback(async () => {
     if (!selectedSlug || !isSupabaseConfigured) return;

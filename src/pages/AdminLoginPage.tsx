@@ -43,7 +43,7 @@ export function AdminLoginPage() {
   return (
     <Layout
       title="Organizer sign in"
-      subtitle="Use the shared league admin account from Supabase Authentication."
+      subtitle="Sign in with any organizer account from Supabase Authentication."
     >
       {!isSupabaseConfigured ? <ConfigBanner /> : null}
       <section className="card">

@@ -8,6 +8,7 @@ import {
   fetchMatchesForNight,
   fetchPlayers,
   fetchSeasonBySlug,
+  fetchSeasons,
   fetchSeasonIntakeMondays,
   rpcAdminAddAnnouncement,
   rpcAdminAddPlayer,
@@ -35,10 +36,16 @@ import { isSupabaseConfigured } from '../lib/supabase';
 import { ConfigBanner, Layout } from '../components/Layout';
 import { formatAppError } from '../lib/errors';
 import { formatOrdinalLongDate } from '../lib/dates';
+import {
+  getDefaultSeasonSlug,
+  setDefaultSeasonSlug,
+} from '../lib/adminPreferences';
+import { useAuth } from '../auth/AuthContext';
 
 export function AdminSeasonPage() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
+  const { session } = useAuth();
   const [season, setSeason] = useState<SeasonRow | null | undefined>(undefined);
   const [players, setPlayers] = useState<PlayerRow[]>([]);
   const [nights, setNights] = useState<GameNightRow[]>([]);
@@ -68,6 +75,11 @@ export function AdminSeasonPage() {
     Array<Awaited<ReturnType<typeof fetchMatchesForNight>>[number]>
   >([]);
   const [playoffMatchesLoading, setPlayoffMatchesLoading] = useState(false);
+  const [allSeasons, setAllSeasons] = useState<
+    Array<{ id: string; slug: string; name: string }>
+  >([]);
+  const [defaultSeasonDraft, setDefaultSeasonDraft] = useState<string>('');
+  const [defaultSeasonSaved, setDefaultSeasonSaved] = useState(false);
 
   const playoffDateStorageKey = useMemo(
     () => (season?.id ? `devl:playoffDate:${season.id}` : null),
@@ -239,6 +251,42 @@ export function AdminSeasonPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  useEffect(() => {
+    if (tab !== 'settings' || !isSupabaseConfigured) return;
+    void (async () => {
+      try {
+        const list = await fetchSeasons();
+        setAllSeasons(
+          list.map((s) => ({ id: s.id, slug: s.slug, name: s.name }))
+        );
+      } catch {
+        setAllSeasons([]);
+      }
+    })();
+  }, [tab]);
+
+  useEffect(() => {
+    if (tab !== 'settings' || !session?.user?.id) return;
+    const saved = getDefaultSeasonSlug(session.user.id);
+    setDefaultSeasonDraft(saved ?? slug ?? '');
+    setDefaultSeasonSaved(false);
+  }, [tab, session?.user?.id, slug]);
+
+  useEffect(() => {
+    if (tab !== 'settings' || allSeasons.length === 0) return;
+    setDefaultSeasonDraft((prev) =>
+      allSeasons.some((s) => s.slug === prev)
+        ? prev
+        : slug ?? allSeasons[0].slug
+    );
+  }, [allSeasons, tab, slug]);
+
+  function saveDefaultSeasonPreference() {
+    if (!session?.user?.id) return;
+    setDefaultSeasonSlug(session.user.id, defaultSeasonDraft.trim() || null);
+    setDefaultSeasonSaved(true);
   }
 
   useEffect(() => {
@@ -1037,6 +1085,49 @@ export function AdminSeasonPage() {
       ) : null}
       {tab === 'settings' ? (
         <>
+          <section className="card">
+            <h2>Default season (home page)</h2>
+            <p className="hint">
+              When you visit the league home page while signed in, the season
+              menu pre-selects this season. Saved per organizer account in this
+              browser (not synced across devices).
+            </p>
+            {session?.user?.id ? (
+              <div className="stack">
+                <label className="field">
+                  <span>Season</span>
+                  <select
+                    value={defaultSeasonDraft}
+                    onChange={(e) => {
+                      setDefaultSeasonDraft(e.target.value);
+                      setDefaultSeasonSaved(false);
+                    }}
+                  >
+                    {allSeasons.map((s) => (
+                      <option key={s.id} value={s.slug}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="btn primary"
+                  disabled={busy || allSeasons.length === 0}
+                  onClick={saveDefaultSeasonPreference}
+                >
+                  Save default season
+                </button>
+                {defaultSeasonSaved ? (
+                  <p className="hint" style={{ marginBottom: 0 }}>
+                    Saved. Open the league home to see the season pre-selected.
+                  </p>
+                ) : null}
+              </div>
+            ) : (
+              <p className="muted">Sign in to set your default season.</p>
+            )}
+          </section>
           <section className="card">
             <h2>Announcements</h2>
             <form className="form inline" onSubmit={addAnnouncement}>
