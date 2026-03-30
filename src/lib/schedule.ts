@@ -18,6 +18,20 @@ export interface ScheduledMatch {
   team_b_p3?: string | null;
 }
 
+/**
+ * Minimum courts so every player can play each round (no forced sit-outs except
+ * one when n % 4 is 1 or 3). Uses one 3v3 match when n % 4 is 2 or 3.
+ */
+export function minimumNetsForAttendance(playerCount: number): number {
+  const n = playerCount;
+  if (n < 4) return 1;
+  const rem = n % 4;
+  if (rem === 0) return Math.floor(n / 4);
+  if (rem === 1) return Math.floor((n - 1) / 4);
+  if (rem === 2) return Math.floor((n - 6) / 4) + 1;
+  return Math.floor((n - 7) / 4) + 1;
+}
+
 interface History {
   partner: Map<string, number>;
   opponent: Map<string, number>;
@@ -347,8 +361,7 @@ export function buildSchedule(
     let available = shuffleInPlace([...attending]);
     const n = attending.length;
     const rem = n % 4;
-    const neededCourts =
-      rem === 0 || rem === 1 ? Math.floor(n / 4) : Math.floor(n / 4) + 1;
+    const neededCourts = minimumNetsForAttendance(n);
     const canApplySpecial = nets >= neededCourts;
     let twoVTwoCourts = nets;
     let threeVThreeCourt = false;

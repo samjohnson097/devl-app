@@ -15,7 +15,7 @@ import {
   type PlayerRow,
   type SeasonRow,
 } from '../api/leagueApi';
-import { buildSchedule } from '../lib/schedule';
+import { buildSchedule, minimumNetsForAttendance } from '../lib/schedule';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { ConfigBanner, Layout } from '../components/Layout';
 import { formatAppError } from '../lib/errors';
@@ -296,8 +296,11 @@ export function GameNightPage() {
       return;
     }
     // Auto-size courts from attendance (no nets setting in UI).
-    // 4 players per court (2v2). Round down so we never oversubscribe courts.
-    const nets = Math.max(1, Math.min(12, Math.floor(attendingIds.length / 4)));
+    // Prefer all 2v2; when count is 2 mod 4 (e.g. 18), one 3v3 court is required.
+    const nets = Math.max(
+      1,
+      Math.min(12, minimumNetsForAttendance(attendingIds.length))
+    );
     if (
       matches.some(
         (m) => m.score_a != null || m.score_b != null
