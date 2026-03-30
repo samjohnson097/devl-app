@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import type { MatchRow } from '../api/leagueApi';
 import { formatOrdinalLongDate, weekdayLong } from '../lib/dates';
-import { computeStandings } from '../lib/standings';
+import { computeStandings, formatWinPctDisplay } from '../lib/standings';
 
 export type NightRecap = { id: string; date: string; matches: MatchRow[] };
 
@@ -164,6 +164,7 @@ function NightRoundCarousel({
                         <th>Player</th>
                         <th>W</th>
                         <th>L</th>
+                        <th>Pct</th>
                         <th>+/-</th>
                       </tr>
                     </thead>
@@ -173,6 +174,7 @@ function NightRoundCarousel({
                           <td>{row.name}</td>
                           <td>{row.wins}</td>
                           <td>{row.losses}</td>
+                          <td>{formatWinPctDisplay(row.winPct)}</td>
                           <td>
                             {row.pointDiff > 0 ? `+${row.pointDiff}` : row.pointDiff}
                           </td>

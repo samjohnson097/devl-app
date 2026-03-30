@@ -24,7 +24,7 @@ import {
   localIsoDateString,
   weekdayLong,
 } from '../lib/dates';
-import { computeStandings } from '../lib/standings';
+import { computeStandings, formatWinPctDisplay } from '../lib/standings';
 import { getDefaultSeasonSlug } from '../lib/adminPreferences';
 
 type IntakeDateRow = {
@@ -491,6 +491,9 @@ export function HomePage() {
 
           <section className="card">
             <h2>Overall standings</h2>
+            <p className="muted" style={{ marginTop: 0, marginBottom: '0.65rem' }}>
+              Sorted by win percentage, then games played, then point differential.
+            </p>
             <div className="table-wrap">
               <table className="table">
                 <thead>
@@ -498,6 +501,7 @@ export function HomePage() {
                     <th>Player</th>
                     <th>W</th>
                     <th>L</th>
+                    <th>Pct</th>
                     <th>+/-</th>
                   </tr>
                 </thead>
@@ -507,6 +511,7 @@ export function HomePage() {
                       <td>{row.name}</td>
                       <td>{row.wins}</td>
                       <td>{row.losses}</td>
+                      <td>{formatWinPctDisplay(row.winPct)}</td>
                       <td>{row.pointDiff > 0 ? `+${row.pointDiff}` : row.pointDiff}</td>
                     </tr>
                   ))}

@@ -13,6 +13,8 @@ export interface PlayerStanding {
   pointsFor: number;
   pointsAgainst: number;
   pointDiff: number;
+  /** Wins / (wins + losses), or null if no decided games. */
+  winPct: number | null;
 }
 
 export function computeStandings(
@@ -60,22 +62,45 @@ export function computeStandings(
   }
 
   return Array.from(stats.entries())
-    .map(([playerId, s]) => ({
-      playerId,
-      name: nameById.get(playerId) ?? playerId,
-      wins: s.w,
-      losses: s.l,
-      pointsFor: s.pf,
-      pointsAgainst: s.pa,
-      pointDiff: s.pf - s.pa,
-    }))
+    .map(([playerId, s]) => {
+      const gp = s.w + s.l;
+      return {
+        playerId,
+        name: nameById.get(playerId) ?? playerId,
+        wins: s.w,
+        losses: s.l,
+        pointsFor: s.pf,
+        pointsAgainst: s.pa,
+        pointDiff: s.pf - s.pa,
+        winPct: gp === 0 ? null : s.w / gp,
+      };
+    })
     .sort(compareStandingRows);
 }
 
+/** Display e.g. "66.7%" or em dash when no games. */
+export function formatWinPctDisplay(winPct: number | null): string {
+  if (winPct == null) return '—';
+  return `${(winPct * 100).toFixed(1)}%`;
+}
+
 function compareStandingRows(a: PlayerStanding, b: PlayerStanding): number {
+  const agp = a.wins + a.losses;
+  const bgp = b.wins + b.losses;
+  const aPlayed = agp > 0;
+  const bPlayed = bgp > 0;
+  if (aPlayed !== bPlayed) return aPlayed ? -1 : 1;
+
+  if (aPlayed && bPlayed) {
+    const pctCmp = b.wins * agp - a.wins * bgp;
+    if (pctCmp !== 0) return pctCmp > 0 ? 1 : -1;
+    // Same win %: more games played ranks higher (larger sample).
+    if (bgp !== agp) return bgp > agp ? 1 : -1;
+  }
+
   return (
-    b.wins - a.wins ||
     b.pointDiff - a.pointDiff ||
+    b.wins - a.wins ||
     a.losses - b.losses ||
     a.name.localeCompare(b.name)
   );

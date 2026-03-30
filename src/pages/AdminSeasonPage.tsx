@@ -34,7 +34,11 @@ import {
   computePoolStandingsFromMatches,
   selectBracketSeedsFromPools,
 } from '../lib/playoffs';
-import { computeStandings, rankPlayerIdsForPlayoffSeeding } from '../lib/standings';
+import {
+  computeStandings,
+  formatWinPctDisplay,
+  rankPlayerIdsForPlayoffSeeding,
+} from '../lib/standings';
 import { isSupabaseConfigured, requireSupabase } from '../lib/supabase';
 import { withJwtRetry } from '../auth/sessionRefresh';
 import { ConfigBanner, Layout } from '../components/Layout';
@@ -1090,8 +1094,8 @@ export function AdminSeasonPage() {
         <section className="card">
           <h2>Season standings</h2>
           <p className="hint">
-            From all entered scores. Point diff is
-            points for minus against.
+            Sorted by win percentage, then games played (tiebreak), then point
+            differential. Point diff is points for minus against.
           </p>
           <div className="table-wrap">
             <table className="table">
@@ -1100,6 +1104,7 @@ export function AdminSeasonPage() {
                   <th>Player</th>
                   <th>W</th>
                   <th>L</th>
+                  <th>Pct</th>
                   <th>PF</th>
                   <th>PA</th>
                   <th>+/-</th>
@@ -1111,6 +1116,7 @@ export function AdminSeasonPage() {
                     <td>{row.name}</td>
                     <td>{row.wins}</td>
                     <td>{row.losses}</td>
+                    <td>{formatWinPctDisplay(row.winPct)}</td>
                     <td>{row.pointsFor}</td>
                     <td>{row.pointsAgainst}</td>
                     <td>{row.pointDiff > 0 ? `+${row.pointDiff}` : row.pointDiff}</td>
