@@ -1,4 +1,5 @@
 import React from 'react';
+import { Analytics } from '@vercel/analytics/react';
 import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router-dom';
 import './App.css';
 import { RequireAdmin } from './components/RequireAdmin';
@@ -28,6 +29,7 @@ function LegacyNightRedirect() {
 
 function App() {
   return (
+    <>
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<HomePage />} />
@@ -68,6 +70,8 @@ function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
+    <Analytics />
+    </>
   );
 }
 
