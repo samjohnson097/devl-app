@@ -704,6 +704,94 @@ details.recap-night[open] > .recap-night-summary .recap-night-chevron {
   margin-top: 0.12rem;
 }
 
+/* Game night admin — collapsible roster (default closed) */
+details.game-night-roster {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0;
+  margin-bottom: 1.25rem;
+  overflow: hidden;
+}
+
+.game-night-roster-summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 1rem 1.35rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  user-select: none;
+  transition: background 0.14s ease;
+}
+
+.game-night-roster-summary::-webkit-details-marker {
+  display: none;
+}
+
+.game-night-roster-summary::marker {
+  content: '';
+}
+
+details.game-night-roster > .game-night-roster-summary {
+  list-style: none;
+}
+
+.game-night-roster-summary:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.game-night-roster-summary:focus {
+  outline: none;
+}
+
+.game-night-roster-summary:focus-visible {
+  outline: 2px solid var(--accent-dim);
+  outline-offset: -2px;
+}
+
+.game-night-roster-summary-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  min-width: 0;
+  text-align: left;
+}
+
+.game-night-roster-heading {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.game-night-roster-collapsed-hint {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+details.game-night-roster[open] .game-night-roster-collapsed-hint {
+  display: none;
+}
+
+details.game-night-roster[open] > .game-night-roster-summary .recap-night-chevron {
+  transform: rotate(45deg);
+  margin-top: 0.12rem;
+}
+
+.game-night-roster-body {
+  padding: 0 1.35rem 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.game-night-roster-body > .hint {
+  margin-top: 0.85rem;
+}
+
 .recap-night-body {
   padding: 0.85rem 1.1rem 1.15rem;
   border-top: 1px solid var(--border);

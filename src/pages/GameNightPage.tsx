@@ -628,28 +628,38 @@ export function GameNightPage() {
     >
       {err ? <p className="error banner-inline">{err}</p> : null}
 
-      <section className="card">
-        <h2>{`Who’s playing tonight (${attendingCount})`}</h2>
-        <p className="hint">
-          Everyone on the roster appears here. Turn off anyone who’s out; they
-          won’t be scheduled.
-        </p>
-        <ul className="list check-list">
-          {players.map((p) => (
-            <li key={p.id} className="list-row">
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={!!attendance[p.id]}
-                  disabled={busy}
-                  onChange={(e) => toggleAttend(p.id, e.target.checked)}
-                />
-                {p.display_name}
-              </label>
-            </li>
-          ))}
-        </ul>
-      </section>
+      <details className="game-night-roster">
+        <summary className="game-night-roster-summary">
+          <span className="game-night-roster-summary-text">
+            <span className="game-night-roster-heading">{`Who’s playing tonight (${attendingCount})`}</span>
+            <span className="game-night-roster-collapsed-hint">
+              Tap to show roster and attendance
+            </span>
+          </span>
+          <span className="recap-night-chevron" aria-hidden />
+        </summary>
+        <div className="game-night-roster-body">
+          <p className="hint">
+            Everyone on the roster appears here. Turn off anyone who’s out; they
+            won’t be scheduled.
+          </p>
+          <ul className="list check-list">
+            {players.map((p) => (
+              <li key={p.id} className="list-row">
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={!!attendance[p.id]}
+                    disabled={busy}
+                    onChange={(e) => toggleAttend(p.id, e.target.checked)}
+                  />
+                  {p.display_name}
+                </label>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </details>
 
       <section className="card">
         <h2>Schedule</h2>
