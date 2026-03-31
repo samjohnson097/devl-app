@@ -39,6 +39,7 @@ export interface PlayerRow {
   season_id: string;
   display_name: string;
   email: string | null;
+  pronouns: string | null;
   monday_available: boolean;
   thursday_available: boolean;
   created_at: string;
@@ -232,6 +233,7 @@ export async function rpcRegisterPlayer(
   seasonSlug: string,
   displayName: string,
   email: string | null,
+  pronouns: string | null,
   mondayAvailability: Array<{ date: string; available: boolean }>
 ): Promise<string> {
   const sb = requireSupabase();
@@ -241,6 +243,7 @@ export async function rpcRegisterPlayer(
     p_season_slug: seasonSlug,
     p_display_name: displayName,
     p_email: email ?? null,
+    p_pronouns: pronouns ?? null,
     p_availability: mondayAvailability,
     }
   );
@@ -328,6 +331,18 @@ export async function rpcAdminSetIntakeMondays(
   const { error } = await sb.rpc('admin_set_intake_mondays', {
     p_season_slug: seasonSlug,
     p_dates: mondayDates,
+  });
+  if (error) throw error;
+}
+
+export async function rpcAdminTruncateSeasonWeeks(
+  seasonSlug: string,
+  keepWeeks: number
+): Promise<void> {
+  const sb = requireSupabase();
+  const { error } = await sb.rpc('admin_truncate_season_weeks', {
+    p_season_slug: seasonSlug,
+    p_keep_weeks: keepWeeks,
   });
   if (error) throw error;
 }

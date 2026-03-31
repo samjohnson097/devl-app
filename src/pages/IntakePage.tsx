@@ -13,8 +13,14 @@ export function IntakePage() {
   );
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [pronouns, setPronouns] = useState('');
   const [mondays, setMondays] = useState<string[]>([]);
   const [availability, setAvailability] = useState<Record<string, boolean>>({});
+  const [agreements, setAgreements] = useState({
+    growth: false,
+    safeSpace: false,
+    genderInclusive: false,
+  });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [done, setDone] = useState(false);
@@ -51,20 +57,27 @@ export function IntakePage() {
     e.preventDefault();
     if (!slug) return;
     setErr(null);
+    if (!agreements.growth || !agreements.safeSpace || !agreements.genderInclusive) {
+      setErr('Please check all three agreements before submitting.');
+      return;
+    }
     setBusy(true);
     try {
       await rpcRegisterPlayer(
         slug,
         name.trim(),
         email.trim() || null,
+        pronouns.trim() || null,
         mondays.map((date) => ({ date, available: !!availability[date] }))
       );
       setDone(true);
       setName('');
       setEmail('');
+      setPronouns('');
       const reset: Record<string, boolean> = {};
       for (const d of mondays) reset[d] = false;
       setAvailability(reset);
+      setAgreements({ growth: false, safeSpace: false, genderInclusive: false });
     } catch (er: unknown) {
       setErr(formatAppError(er));
     } finally {
@@ -136,6 +149,14 @@ export function IntakePage() {
               placeholder="you@example.com"
             />
           </label>
+          <label className="field">
+            <span>Pronouns (optional)</span>
+            <input
+              value={pronouns}
+              onChange={(e) => setPronouns(e.target.value)}
+              placeholder="e.g., she/her, he/him, they/them"
+            />
+          </label>
           <fieldset className="fieldset">
             <legend>Upcoming Mondays</legend>
             {mondays.map((date) => (
@@ -154,8 +175,69 @@ export function IntakePage() {
               </label>
             ))}
           </fieldset>
+          <fieldset className="fieldset">
+            <legend>Agreements</legend>
+            <label className="check" style={{ alignItems: 'flex-start' }}>
+              <input
+                type="checkbox"
+                checked={agreements.growth}
+                onChange={(e) => {
+                  setErr(null);
+                  setAgreements((prev) => ({ ...prev, growth: e.target.checked }));
+                }}
+              />
+              <span>
+                I will come to volleyball with a desire to grow and support the growth
+                of those around me.
+              </span>
+            </label>
+            <label className="check" style={{ alignItems: 'flex-start' }}>
+              <input
+                type="checkbox"
+                checked={agreements.safeSpace}
+                onChange={(e) => {
+                  setErr(null);
+                  setAgreements((prev) => ({ ...prev, safeSpace: e.target.checked }));
+                }}
+              />
+              <span>
+                I acknowledge the existence of a spectrum of sexualities, religions,
+                and racial identities. I support Dig Easy as a safe space for all
+                through my expression of positive dialogue and mindful consideration
+                of all players.
+              </span>
+            </label>
+            <label className="check" style={{ alignItems: 'flex-start' }}>
+              <input
+                type="checkbox"
+                checked={agreements.genderInclusive}
+                onChange={(e) => {
+                  setErr(null);
+                  setAgreements((prev) => ({
+                    ...prev,
+                    genderInclusive: e.target.checked,
+                  }));
+                }}
+              />
+              <span>
+                I acknowledge the existence of all genders, both inside and outside
+                of the typical gender binary, and I will strive to use gender inclusive
+                language wherever possible. I will be mindful of my ability to abide
+                by these agreements and I will remove myself when I feel like I cannot.
+              </span>
+            </label>
+          </fieldset>
           {err ? <p className="error">{err}</p> : null}
-          <button className="btn primary" type="submit" disabled={busy}>
+          <button
+            className="btn primary"
+            type="submit"
+            disabled={
+              busy ||
+              !agreements.growth ||
+              !agreements.safeSpace ||
+              !agreements.genderInclusive
+            }
+          >
             {busy ? 'Saving…' : 'Submit'}
           </button>
         </form>

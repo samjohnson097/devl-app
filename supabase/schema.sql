@@ -28,10 +28,14 @@ create table if not exists public.players (
   season_id uuid not null references public.seasons (id) on delete cascade,
   display_name text not null,
   email text,
+  pronouns text,
   monday_available boolean not null default true,
   thursday_available boolean not null default false,
   created_at timestamptz not null default now()
 );
+
+alter table public.players
+  add column if not exists pronouns text;
 
 create index if not exists players_season_idx on public.players (season_id);
 
@@ -884,10 +888,69 @@ begin
 end;
 $$;
 
+-- Shorten a season by removing trailing intake weeks (and any regular-week game nights on those dates).
+drop function if exists public.admin_truncate_season_weeks(text, int);
+create or replace function public.admin_truncate_season_weeks(
+  p_season_slug text,
+  p_keep_weeks int
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+set row_security = off
+as $$
+declare
+  v_season uuid;
+  v_keep int;
+  v_dates date[];
+  v_remove date[];
+begin
+  perform public.assert_authenticated();
+  select id into v_season from public.seasons where slug = p_season_slug;
+  if v_season is null then raise exception 'Season not found'; end if;
+
+  v_keep := greatest(0, least(8, p_keep_weeks));
+
+  select array_agg(monday_date order by display_order)
+  into v_dates
+  from public.season_intake_mondays
+  where season_id = v_season;
+
+  if v_dates is null then
+    return;
+  end if;
+
+  if cardinality(v_dates) <= v_keep then
+    return;
+  end if;
+
+  v_remove := v_dates[(v_keep + 1):cardinality(v_dates)];
+
+  -- Remove the trailing intake Mondays.
+  delete from public.season_intake_mondays
+  where season_id = v_season
+    and monday_date = any(v_remove);
+
+  -- Remove player availability entries for removed Mondays.
+  delete from public.player_monday_availability pma
+  using public.players p
+  where p.id = pma.player_id
+    and p.season_id = v_season
+    and pma.monday_date = any(v_remove);
+
+  -- Remove any regular-week game nights on those dates (cascades matches + attendance).
+  delete from public.game_nights
+  where season_id = v_season
+    and night_date = any(v_remove);
+end;
+$$;
+
 create or replace function public.register_player_with_monday_availability(
   p_season_slug text,
   p_display_name text,
   p_email text default null,
+  p_pronouns text default null,
   p_availability jsonb default '[]'::jsonb
 )
 returns uuid
@@ -907,8 +970,15 @@ begin
     raise exception 'Name required';
   end if;
 
-  insert into public.players (season_id, display_name, email, monday_available, thursday_available)
-  values (v_season, trim(p_display_name), nullif(trim(p_email), ''), true, false)
+  insert into public.players (season_id, display_name, email, pronouns, monday_available, thursday_available)
+  values (
+    v_season,
+    trim(p_display_name),
+    nullif(trim(p_email), ''),
+    nullif(trim(p_pronouns), ''),
+    true,
+    false
+  )
   returning id into v_player;
 
   for a in select * from jsonb_array_elements(coalesce(p_availability, '[]'::jsonb))
@@ -1057,10 +1127,11 @@ grant select on public.announcements to anon, authenticated;
 grant select on public.season_intake_mondays to anon, authenticated;
 grant select on public.player_monday_availability to anon, authenticated;
 
-grant execute on function public.register_player_with_monday_availability(text, text, text, jsonb) to anon, authenticated;
+grant execute on function public.register_player_with_monday_availability(text, text, text, text, jsonb) to anon, authenticated;
 grant execute on function public.get_intake_form_data(text) to anon, authenticated;
 grant execute on function public.create_season_with_mondays(text, int, int, date) to authenticated;
 grant execute on function public.admin_set_intake_mondays(text, jsonb) to authenticated;
+grant execute on function public.admin_truncate_season_weeks(text, int) to authenticated;
 grant execute on function public.admin_add_announcement(text, text) to authenticated;
 grant execute on function public.admin_delete_announcement(uuid) to authenticated;
 grant execute on function public.admin_set_season_hide_from_public(text, boolean) to authenticated;
@@ -1071,6 +1142,7 @@ grant execute on function public.submit_league_feedback(text, text) to anon, aut
 
 revoke execute on function public.create_season_with_mondays(text, int, int, date) from anon;
 revoke execute on function public.admin_set_intake_mondays(text, jsonb) from anon;
+revoke execute on function public.admin_truncate_season_weeks(text, int) from anon;
 revoke execute on function public.admin_add_announcement(text, text) from anon;
 revoke execute on function public.admin_delete_announcement(uuid) from anon;
 revoke execute on function public.admin_set_season_hide_from_public(text, boolean) from anon;

@@ -21,6 +21,7 @@ import {
   rpcAdminUpdatePlayerName,
   rpcAdminCancelAndShiftIntakeWeek,
   rpcAdminSetIntakeMondays,
+  rpcAdminTruncateSeasonWeeks,
   rpcSaveStageMatches,
   rpcSetAttendance,
   type AnnouncementRow,
@@ -96,6 +97,8 @@ export function AdminSeasonPage() {
   const [editPlayerId, setEditPlayerId] = useState<string | null>(null);
   const [editPlayerDraft, setEditPlayerDraft] = useState('');
   const [editPlayerBusy, setEditPlayerBusy] = useState(false);
+  const [seasonWeeksDraft, setSeasonWeeksDraft] = useState<number>(8);
+  const [seasonWeeksBusy, setSeasonWeeksBusy] = useState(false);
 
   const playoffDateStorageKey = useMemo(
     () => (season?.id ? `devl:playoffDate:${season.id}` : null),
@@ -132,6 +135,7 @@ export function AdminSeasonPage() {
     setAnnouncements(anns);
     setLeagueFeedback(feedback);
     setIntakeMondays(mondays);
+    setSeasonWeeksDraft(Math.max(0, Math.min(8, mondays.length)));
     setStandings(computeStandings(pl, matches));
     try {
       const sb = requireSupabase();
@@ -506,6 +510,31 @@ export function AdminSeasonPage() {
       setErr(formatAppError(er));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function truncateSeasonWeeks() {
+    if (!slug) return;
+    const current = intakeMondays.length;
+    const keep = Math.max(0, Math.min(8, seasonWeeksDraft));
+    if (keep >= current) return;
+
+    const ok = window.confirm(
+      `Shorten season from ${current} week${current === 1 ? '' : 's'} to ${keep}?\n\n` +
+        'This will remove trailing intake Mondays and delete any game nights on those removed dates (including matches and attendance).'
+    );
+    if (!ok) return;
+
+    setSeasonWeeksBusy(true);
+    setErr(null);
+    try {
+      const sb = requireSupabase();
+      await withJwtRetry(sb, () => rpcAdminTruncateSeasonWeeks(slug, keep));
+      await reload();
+    } catch (er: unknown) {
+      setErr(formatAppError(er));
+    } finally {
+      setSeasonWeeksBusy(false);
     }
   }
 
@@ -1394,6 +1423,52 @@ export function AdminSeasonPage() {
                 Save Monday dates
               </button>
             </div>
+          </section>
+          <section className="card">
+            <h2>Season length</h2>
+            <p className="hint">
+              If you won’t play a full 8-week season, you can shorten it by
+              removing trailing weeks. This updates intake Mondays and deletes
+              any game nights on the removed dates.
+            </p>
+            <div className="field-row">
+              <label className="field">
+                <span>Weeks to keep</span>
+                <select
+                  value={seasonWeeksDraft}
+                  disabled={busy || seasonWeeksBusy}
+                  onChange={(e) => setSeasonWeeksDraft(Number(e.target.value))}
+                >
+                  {Array.from({ length: 9 }).map((_, i) => (
+                    <option key={i} value={i}>
+                      {i}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="field" style={{ alignSelf: 'end' }}>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  disabled={
+                    busy ||
+                    seasonWeeksBusy ||
+                    seasonWeeksDraft >= intakeMondays.length
+                  }
+                  onClick={() => void truncateSeasonWeeks()}
+                >
+                  {seasonWeeksBusy ? 'Saving…' : 'Remove trailing weeks'}
+                </button>
+              </div>
+            </div>
+            <p className="muted small" style={{ marginTop: 0 }}>
+              Current: {intakeMondays.length} week{intakeMondays.length === 1 ? '' : 's'}
+              {intakeMondays.length > 0
+                ? ` (last: ${formatOrdinalLongDate(
+                    intakeMondays[intakeMondays.length - 1]?.monday_date
+                  )})`
+                : ''}
+            </p>
           </section>
           <section className="card">
             <h2>Cancel a week &amp; shift schedule</h2>

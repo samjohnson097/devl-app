@@ -15,6 +15,7 @@ alter function public.admin_save_schedule(uuid, jsonb) set row_security = off;
 alter function public.admin_set_match_score(uuid, integer, integer) set row_security = off;
 alter function public.create_season_with_mondays(text, integer, integer, date) set row_security = off;
 alter function public.admin_set_intake_mondays(text, jsonb) set row_security = off;
+alter function public.admin_truncate_season_weeks(text, integer) set row_security = off;
 alter function public.register_player_with_monday_availability(text, text, text, jsonb) set row_security = off;
 alter function public.admin_add_announcement(text, text) set row_security = off;
 alter function public.admin_delete_announcement(uuid) set row_security = off;
