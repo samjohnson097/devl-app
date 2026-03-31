@@ -334,6 +334,33 @@ begin
 end;
 $$;
 
+drop function if exists public.admin_update_player_name(uuid, text);
+create or replace function public.admin_update_player_name(
+  p_player_id uuid,
+  p_display_name text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+set row_security = off
+as $$
+declare
+  v_season uuid;
+  v_name text;
+begin
+  perform public.assert_authenticated();
+  select season_id into v_season from public.players where id = p_player_id;
+  if v_season is null then raise exception 'Player not found'; end if;
+  v_name := trim(p_display_name);
+  if length(v_name) < 1 then raise exception 'Name required'; end if;
+
+  update public.players
+  set display_name = v_name
+  where id = p_player_id;
+end;
+$$;
+
 drop function if exists public.admin_save_schedule(uuid, uuid, jsonb);
 create or replace function public.admin_save_schedule(
   p_game_night_id uuid,
@@ -712,6 +739,7 @@ grant execute on function public.admin_seed_attendance(uuid) to authenticated;
 grant execute on function public.admin_set_attendance(uuid, uuid, boolean) to authenticated;
 grant execute on function public.admin_add_player(text, text, boolean, boolean) to authenticated;
 grant execute on function public.admin_remove_player(uuid) to authenticated;
+grant execute on function public.admin_update_player_name(uuid, text) to authenticated;
 grant execute on function public.admin_save_schedule(uuid, jsonb) to authenticated;
 grant execute on function public.admin_save_stage_matches(uuid, text, jsonb) to authenticated;
 grant execute on function public.admin_set_match_score(uuid, int, int) to authenticated;
@@ -725,6 +753,7 @@ revoke execute on function public.admin_seed_attendance(uuid) from anon;
 revoke execute on function public.admin_set_attendance(uuid, uuid, boolean) from anon;
 revoke execute on function public.admin_add_player(text, text, boolean, boolean) from anon;
 revoke execute on function public.admin_remove_player(uuid) from anon;
+revoke execute on function public.admin_update_player_name(uuid, text) from anon;
 revoke execute on function public.admin_save_schedule(uuid, jsonb) from anon;
 revoke execute on function public.admin_save_stage_matches(uuid, text, jsonb) from anon;
 revoke execute on function public.admin_set_match_score(uuid, int, int) from anon;

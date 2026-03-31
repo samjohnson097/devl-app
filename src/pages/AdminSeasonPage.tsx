@@ -17,6 +17,7 @@ import {
   rpcAdminDeleteAnnouncement,
   rpcAdminSetSeasonHideFromPublic,
   rpcAdminRemovePlayer,
+  rpcAdminUpdatePlayerName,
   rpcAdminCancelAndShiftIntakeWeek,
   rpcAdminSetIntakeMondays,
   rpcSaveStageMatches,
@@ -91,6 +92,9 @@ export function AdminSeasonPage() {
   const [defaultSeasonSaved, setDefaultSeasonSaved] = useState(false);
   const [hideFromPublic, setHideFromPublic] = useState(false);
   const [hideFromPublicBusy, setHideFromPublicBusy] = useState(false);
+  const [editPlayerId, setEditPlayerId] = useState<string | null>(null);
+  const [editPlayerDraft, setEditPlayerDraft] = useState('');
+  const [editPlayerBusy, setEditPlayerBusy] = useState(false);
 
   const playoffDateStorageKey = useMemo(
     () => (season?.id ? `devl:playoffDate:${season.id}` : null),
@@ -413,6 +417,34 @@ export function AdminSeasonPage() {
       setErr(formatAppError(er));
     } finally {
       setBusy(false);
+    }
+  }
+
+  function openEditPlayer(p: PlayerRow) {
+    setErr(null);
+    setEditPlayerId(p.id);
+    setEditPlayerDraft(p.display_name);
+  }
+
+  async function saveEditPlayer() {
+    if (!editPlayerId) return;
+    const next = editPlayerDraft.trim();
+    if (!next) {
+      setErr('Name required.');
+      return;
+    }
+    setEditPlayerBusy(true);
+    setErr(null);
+    try {
+      const sb = requireSupabase();
+      await withJwtRetry(sb, () => rpcAdminUpdatePlayerName(editPlayerId, next));
+      setEditPlayerId(null);
+      setEditPlayerDraft('');
+      await reload();
+    } catch (er: unknown) {
+      setErr(formatAppError(er));
+    } finally {
+      setEditPlayerBusy(false);
     }
   }
 
@@ -765,14 +797,24 @@ export function AdminSeasonPage() {
                 <span>
                   <strong>{p.display_name}</strong>
                 </span>
-                <button
-                  type="button"
-                  className="btn text danger"
-                  disabled={busy}
-                  onClick={() => removePlayer(p.id)}
-                >
-                  Remove
-                </button>
+                <span className="actions-row" style={{ margin: 0 }}>
+                  <button
+                    type="button"
+                    className="btn text"
+                    disabled={busy}
+                    onClick={() => openEditPlayer(p)}
+                  >
+                    Edit name
+                  </button>
+                  <button
+                    type="button"
+                    className="btn text danger"
+                    disabled={busy}
+                    onClick={() => removePlayer(p.id)}
+                  >
+                    Remove
+                  </button>
+                </span>
               </li>
             ))}
           </ul>
@@ -787,6 +829,49 @@ export function AdminSeasonPage() {
             </button>
           </form>
         </section>
+      ) : null}
+
+      {editPlayerId ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal card">
+            <div className="modal-head">
+              <h2>Edit player name</h2>
+              <button
+                type="button"
+                className="btn text"
+                disabled={busy || editPlayerBusy}
+                onClick={() => {
+                  setEditPlayerId(null);
+                  setEditPlayerDraft('');
+                  setErr(null);
+                }}
+              >
+                Close
+              </button>
+            </div>
+            <p className="hint">This changes the name displayed everywhere for this season.</p>
+            {err ? <p className="error">{err}</p> : null}
+            <label className="field">
+              <span>Name</span>
+              <input
+                value={editPlayerDraft}
+                onChange={(e) => setEditPlayerDraft(e.target.value)}
+                disabled={busy || editPlayerBusy}
+                autoFocus
+              />
+            </label>
+            <div className="actions-row">
+              <button
+                type="button"
+                className="btn primary"
+                disabled={busy || editPlayerBusy || !editPlayerDraft.trim()}
+                onClick={() => void saveEditPlayer()}
+              >
+                {editPlayerBusy ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {tab === 'nights' ? (

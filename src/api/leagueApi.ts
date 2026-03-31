@@ -273,6 +273,18 @@ export async function rpcAdminRemovePlayer(playerId: string): Promise<void> {
   if (error) throw error;
 }
 
+export async function rpcAdminUpdatePlayerName(
+  playerId: string,
+  displayName: string
+): Promise<void> {
+  const sb = requireSupabase();
+  const { error } = await sb.rpc('admin_update_player_name', {
+    p_player_id: playerId,
+    p_display_name: displayName,
+  });
+  if (error) throw error;
+}
+
 export async function rpcAdminAddAnnouncement(
   seasonSlug: string,
   message: string

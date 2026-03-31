@@ -10,6 +10,7 @@ alter function public.admin_seed_attendance(uuid) set row_security = off;
 alter function public.admin_set_attendance(uuid, uuid, boolean) set row_security = off;
 alter function public.admin_add_player(text, text, boolean, boolean) set row_security = off;
 alter function public.admin_remove_player(uuid) set row_security = off;
+alter function public.admin_update_player_name(uuid, text) set row_security = off;
 alter function public.admin_save_schedule(uuid, jsonb) set row_security = off;
 alter function public.admin_set_match_score(uuid, integer, integer) set row_security = off;
 alter function public.create_season_with_mondays(text, integer, integer, date) set row_security = off;
