@@ -6,6 +6,7 @@ import {
   fetchAttendance,
   fetchGameNights,
   fetchMatchesForNight,
+  fetchMatchesForNights,
   fetchPlayers,
   fetchSeasonBySlug,
   fetchSeasons,
@@ -595,7 +596,29 @@ export function AdminSeasonPage() {
       }
 
       const scored = await fetchAllScoredMatchesForSeason(season.id);
-      const rankedIds = rankPlayerIdsForPlayoffSeeding(players, scored);
+      const intakeDateSet = new Set(intakeMondays.map((m) => m.monday_date));
+      const leagueNightIds = nights
+        .filter((n) => intakeDateSet.has(n.night_date))
+        .map((n) => n.id);
+      const leagueMatches = await fetchMatchesForNights(leagueNightIds);
+      const byNight = new Map<string, Array<(typeof leagueMatches)[number]>>();
+      for (const m of leagueMatches) {
+        const cur = byNight.get(m.game_night_id) ?? [];
+        cur.push(m);
+        byNight.set(m.game_night_id, cur);
+      }
+      const weeksPlayed = leagueNightIds.filter((id) => {
+        const ms = byNight.get(id) ?? [];
+        return ms.length > 0 && ms.every((m) => m.score_a != null && m.score_b != null);
+      }).length;
+      const totalPossibleGames = weeksPlayed * season.games_per_night;
+      const rankedIds = rankPlayerIdsForPlayoffSeeding(players, scored, {
+        penalty: {
+          totalPossibleGames,
+          minFraction: 0.5,
+          penaltyPoints: 0.1,
+        },
+      });
       const payload = buildPlayoffPoolMatchPayload(
         attendingIds,
         rankedIds,

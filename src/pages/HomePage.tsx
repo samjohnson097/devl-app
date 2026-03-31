@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   fetchAllScoredMatchesForSeason,
@@ -24,7 +24,13 @@ import {
   localIsoDateString,
   weekdayLong,
 } from '../lib/dates';
-import { computeStandings, formatWinPctDisplay } from '../lib/standings';
+import {
+  computeStandings,
+  effectiveWinPct,
+  formatWinPctDisplay,
+  sortStandings,
+  type WinPctPenaltyConfig,
+} from '../lib/standings';
 import { getDefaultSeasonSlug } from '../lib/adminPreferences';
 
 type IntakeDateRow = {
@@ -49,6 +55,7 @@ export function HomePage() {
   >([]);
   const [selectedSlug, setSelectedSlug] = useState<string>('');
   const [selectedSeasonName, setSelectedSeasonName] = useState<string>('');
+  const [selectedGamesPerNight, setSelectedGamesPerNight] = useState<number>(5);
   const [intakeDateRows, setIntakeDateRows] = useState<IntakeDateRow[]>([]);
   const [announcements, setAnnouncements] = useState<
     Array<{ id: string; message: string; created_at: string }>
@@ -61,6 +68,7 @@ export function HomePage() {
   const [standings, setStandings] = useState<
     ReturnType<typeof computeStandings>
   >([]);
+  const [standingsPenaltyOn, setStandingsPenaltyOn] = useState(false);
   const [name, setName] = useState('');
   const [games, setGames] = useState(5);
   const [firstMonday, setFirstMonday] = useState('');
@@ -142,6 +150,7 @@ export function HomePage() {
       const s = await withJwtRetry(sb, () => fetchSeasonBySlug(selectedSlug));
       if (!s) return;
       setSelectedSeasonName(s.name);
+      setSelectedGamesPerNight(s.games_per_night ?? 5);
       const [mons, anns, players, nights, scored] = await withJwtRetry(
         sb,
         () =>
@@ -216,6 +225,26 @@ export function HomePage() {
       setErr(formatAppError(er));
     }
   }, [selectedSlug]);
+
+  const standingsPenalty: WinPctPenaltyConfig | null = useMemo(() => {
+    const weeksPlayed = intakeDateRows.filter((r) => r.scoresComplete).length;
+    if (!weeksPlayed || !selectedGamesPerNight) return null;
+    return {
+      totalPossibleGames: weeksPlayed * selectedGamesPerNight,
+      minFraction: 0.5,
+      penaltyPoints: 0.1,
+    };
+  }, [intakeDateRows, selectedGamesPerNight]);
+
+  const standingsForDisplay = useMemo(() => {
+    if (!standingsPenaltyOn || !standingsPenalty) return standings;
+    return sortStandings(standings, { penalty: standingsPenalty });
+  }, [standings, standingsPenaltyOn, standingsPenalty]);
+
+  const penaltyThresholdGames = useMemo(() => {
+    if (!standingsPenaltyOn || !standingsPenalty) return null;
+    return Math.ceil(standingsPenalty.totalPossibleGames * 0.5);
+  }, [standingsPenaltyOn, standingsPenalty]);
 
   useEffect(() => {
     void reloadSelectedSeason();
@@ -494,6 +523,17 @@ export function HomePage() {
             <p className="muted" style={{ marginTop: 0, marginBottom: '0.65rem' }}>
               Sorted by win percentage, then games played, then point differential.
             </p>
+            {standingsPenalty ? (
+              <label className="check" style={{ marginBottom: '0.85rem' }}>
+                <input
+                  type="checkbox"
+                  checked={standingsPenaltyOn}
+                  onChange={(e) => setStandingsPenaltyOn(e.target.checked)}
+                />
+                Subtract 10 percentage points from win% if a player has played less than 50% of games
+                ({standingsPenalty.totalPossibleGames} possible)
+              </label>
+            ) : null}
             <div className="table-wrap">
               <table className="table">
                 <thead>
@@ -506,18 +546,43 @@ export function HomePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {standings.map((row) => (
+                  {standingsForDisplay.map((row) => (
                     <tr key={row.playerId}>
                       <td>{row.name}</td>
                       <td>{row.wins}</td>
                       <td>{row.losses}</td>
-                      <td>{formatWinPctDisplay(row.winPct)}</td>
+                      <td>
+                        <span
+                          className={
+                            standingsPenaltyOn &&
+                            standingsPenalty &&
+                            penaltyThresholdGames != null &&
+                            row.gamesPlayed < penaltyThresholdGames
+                              ? 'pct-penalized'
+                              : undefined
+                          }
+                          title={
+                            standingsPenaltyOn &&
+                            standingsPenalty &&
+                            penaltyThresholdGames != null &&
+                            row.gamesPlayed < penaltyThresholdGames
+                              ? `Penalty applied (played ${row.gamesPlayed} of ${standingsPenalty.totalPossibleGames} possible so far)`
+                              : undefined
+                          }
+                        >
+                          {formatWinPctDisplay(
+                            standingsPenaltyOn && standingsPenalty
+                              ? effectiveWinPct(row, standingsPenalty)
+                              : row.winPct
+                          )}
+                        </span>
+                      </td>
                       <td>{row.pointDiff > 0 ? `+${row.pointDiff}` : row.pointDiff}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              {standings.length === 0 ? (
+              {standingsForDisplay.length === 0 ? (
                 <p className="muted">No scored matches yet.</p>
               ) : null}
             </div>

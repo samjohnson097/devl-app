@@ -278,6 +278,11 @@ input:focus {
   color: var(--danger);
 }
 
+.pct-penalized {
+  color: var(--danger);
+  font-weight: 650;
+}
+
 .btn.small {
   padding: 0.35rem 0.65rem;
   font-size: 0.85rem;

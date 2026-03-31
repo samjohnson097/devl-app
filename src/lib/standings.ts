@@ -10,12 +10,23 @@ export interface PlayerStanding {
   name: string;
   wins: number;
   losses: number;
+  /** Decided games played (wins + losses). */
+  gamesPlayed: number;
   pointsFor: number;
   pointsAgainst: number;
   pointDiff: number;
   /** Wins / (wins + losses), or null if no decided games. */
   winPct: number | null;
 }
+
+export type WinPctPenaltyConfig = {
+  /** Total possible games in the season for a full-participation player. */
+  totalPossibleGames: number;
+  /** Minimum fraction of totalPossibleGames before penalty applies. Default 0.5. */
+  minFraction?: number;
+  /** Subtract this many percentage points when penalized. Default 0.10 (10 points). */
+  penaltyPoints?: number;
+};
 
 export function computeStandings(
   players: { id: string; display_name: string }[],
@@ -69,6 +80,7 @@ export function computeStandings(
         name: nameById.get(playerId) ?? playerId,
         wins: s.w,
         losses: s.l,
+        gamesPlayed: gp,
         pointsFor: s.pf,
         pointsAgainst: s.pa,
         pointDiff: s.pf - s.pa,
@@ -84,16 +96,76 @@ export function formatWinPctDisplay(winPct: number | null): string {
   return `${(winPct * 100).toFixed(1)}%`;
 }
 
-function compareStandingRows(a: PlayerStanding, b: PlayerStanding): number {
-  const agp = a.wins + a.losses;
-  const bgp = b.wins + b.losses;
+function effectiveWinPctFraction(
+  row: Pick<PlayerStanding, 'wins' | 'losses' | 'gamesPlayed'>,
+  penalty?: WinPctPenaltyConfig
+): { num: number; den: number } | null {
+  const gp = row.gamesPlayed;
+  if (gp <= 0) return null;
+
+  if (!penalty) {
+    // Scale by 10 to keep ints, matching the penalized form.
+    return { num: 10 * row.wins, den: 10 * gp };
+  }
+
+  const total = Math.max(0, penalty.totalPossibleGames);
+  const minFraction = penalty.minFraction ?? 0.5;
+  const penaltyPoints = penalty.penaltyPoints ?? 0.1;
+  const canUseExactTenPoints = Math.abs(penaltyPoints - 0.1) < 1e-9;
+  const threshold = Math.ceil(total * minFraction);
+  const isPenalized = total > 0 && gp < threshold;
+
+  if (!isPenalized) {
+    return { num: 10 * row.wins, den: 10 * gp };
+  }
+
+  // 10 percentage points off: win% - 0.10 = (wins/gp) - (1/10) = (10*wins - gp) / (10*gp)
+  if (canUseExactTenPoints) {
+    return { num: Math.max(0, 10 * row.wins - gp), den: 10 * gp };
+  }
+
+  // Fallback: keep close-enough numeric behavior.
+  const eff = Math.max(0, row.wins / gp - penaltyPoints);
+  return { num: eff, den: 1 } as unknown as { num: number; den: number };
+}
+
+export function effectiveWinPct(
+  row: Pick<PlayerStanding, 'wins' | 'losses' | 'gamesPlayed'>,
+  penalty?: WinPctPenaltyConfig
+): number | null {
+  const frac = effectiveWinPctFraction(row, penalty);
+  if (!frac) return null;
+  return frac.num / frac.den;
+}
+
+export function sortStandings(
+  rows: PlayerStanding[],
+  opts?: { penalty?: WinPctPenaltyConfig }
+): PlayerStanding[] {
+  const penalty = opts?.penalty;
+  return rows
+    .slice()
+    .sort((a, b) => compareStandingRows(a, b, { penalty }));
+}
+
+function compareStandingRows(
+  a: PlayerStanding,
+  b: PlayerStanding,
+  opts?: { penalty?: WinPctPenaltyConfig }
+): number {
+  const agp = a.gamesPlayed ?? a.wins + a.losses;
+  const bgp = b.gamesPlayed ?? b.wins + b.losses;
   const aPlayed = agp > 0;
   const bPlayed = bgp > 0;
   if (aPlayed !== bPlayed) return aPlayed ? -1 : 1;
 
   if (aPlayed && bPlayed) {
-    const pctCmp = b.wins * agp - a.wins * bgp;
-    if (pctCmp !== 0) return pctCmp > 0 ? 1 : -1;
+    const af = effectiveWinPctFraction(a, opts?.penalty);
+    const bf = effectiveWinPctFraction(b, opts?.penalty);
+    if (af && bf) {
+      const pctCmp = bf.num * af.den - af.num * bf.den;
+      if (pctCmp !== 0) return pctCmp > 0 ? 1 : -1;
+    }
     // Same win %: more games played ranks higher (larger sample).
     if (bgp !== agp) return bgp > agp ? 1 : -1;
   }
@@ -113,12 +185,9 @@ function compareStandingRows(a: PlayerStanding, b: PlayerStanding): number {
  */
 export function rankPlayerIdsForPlayoffSeeding(
   players: { id: string; display_name: string }[],
-  matches: MatchWithScores[]
+  matches: MatchWithScores[],
+  opts?: { penalty?: WinPctPenaltyConfig }
 ): string[] {
   const rows = computeStandings(players, matches);
-  const played = rows.filter((r) => r.wins + r.losses > 0);
-  const notPlayed = rows.filter((r) => r.wins + r.losses === 0);
-  played.sort(compareStandingRows);
-  notPlayed.sort((a, b) => a.name.localeCompare(b.name));
-  return [...played, ...notPlayed].map((r) => r.playerId);
+  return sortStandings(rows, opts).map((r) => r.playerId);
 }
