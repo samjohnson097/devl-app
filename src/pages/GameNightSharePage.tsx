@@ -47,7 +47,7 @@ export function GameNightSharePage() {
       }
       setNight(n);
       const [pl, att, mt] = await Promise.all([
-        fetchPlayers(s.id),
+        fetchPlayers(s.id, { includeRemoved: true }),
         fetchAttendance(nightId),
         fetchMatchesForNight(nightId),
       ]);
@@ -55,7 +55,7 @@ export function GameNightSharePage() {
       setMatches(mt);
       const attMap: Record<string, boolean> = {};
       for (const a of att) attMap[a.player_id] = a.attending;
-      for (const p of pl) {
+      for (const p of pl.filter((x) => x.removed_at == null)) {
         if (attMap[p.id] === undefined) attMap[p.id] = true;
       }
       setAttendance(attMap);
@@ -78,9 +78,14 @@ export function GameNightSharePage() {
     return m;
   }, [players]);
 
+  const rosterPlayers = useMemo(
+    () => players.filter((p) => p.removed_at == null),
+    [players]
+  );
+
   const attendingPlayers = useMemo(
-    () => players.filter((p) => !!attendance[p.id]),
-    [players, attendance]
+    () => rosterPlayers.filter((p) => !!attendance[p.id]),
+    [rosterPlayers, attendance]
   );
 
   if (!slug || !nightId) {

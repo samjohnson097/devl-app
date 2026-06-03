@@ -19,18 +19,21 @@ export type PoolMatch = {
 function snakeAssignIndices(count: number, poolCount: number): number[] {
   // Returns poolIndex for seeds 1..count in snake order across pools.
   const out: number[] = [];
-  let dir = 1;
+  let dir: 1 | -1 = 1;
   let p = 0;
   for (let i = 0; i < count; i++) {
     out.push(p);
     if (poolCount === 1) continue;
-    const next = p + dir;
-    if (next < 0 || next >= poolCount) {
-      dir *= -1;
-      p += dir;
-    } else {
-      p = next;
+    // Bounce at ends, duplicating the end pool (e.g. 0,1,2,2,1,0,0,1...).
+    if (dir === 1 && p === poolCount - 1) {
+      dir = -1;
+      continue;
     }
+    if (dir === -1 && p === 0) {
+      dir = 1;
+      continue;
+    }
+    p += dir;
   }
   return out;
 }

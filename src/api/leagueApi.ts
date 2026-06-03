@@ -43,7 +43,14 @@ export interface PlayerRow {
   monday_available: boolean;
   thursday_available: boolean;
   created_at: string;
+  /** Set when removed from roster; row kept for past games and standings. */
+  removed_at: string | null;
 }
+
+export type FetchPlayersOptions = {
+  /** Include players removed from the roster (for standings / name lookup). Default false. */
+  includeRemoved?: boolean;
+};
 
 export interface GameNightRow {
   id: string;
@@ -218,13 +225,16 @@ export async function fetchSeasonIntakeMondays(
   return (data ?? []) as SeasonIntakeMondayRow[];
 }
 
-export async function fetchPlayers(seasonId: string): Promise<PlayerRow[]> {
+export async function fetchPlayers(
+  seasonId: string,
+  opts?: FetchPlayersOptions
+): Promise<PlayerRow[]> {
   const sb = requireSupabase();
-  const { data, error } = await sb
-    .from('players')
-    .select('*')
-    .eq('season_id', seasonId)
-    .order('display_name');
+  let q = sb.from('players').select('*').eq('season_id', seasonId);
+  if (!opts?.includeRemoved) {
+    q = q.is('removed_at', null);
+  }
+  const { data, error } = await q.order('display_name');
   if (error) throw error;
   return (data ?? []) as PlayerRow[];
 }

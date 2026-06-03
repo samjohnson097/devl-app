@@ -123,7 +123,7 @@ export function AdminSeasonPage() {
     if (!s) return;
     setHideFromPublic(!!s.hide_from_public);
     const [pl, gn, matches, anns, mondays, feedback] = await Promise.all([
-      fetchPlayers(s.id),
+      fetchPlayers(s.id, { includeRemoved: true }),
       fetchGameNights(s.id),
       fetchAllScoredMatchesForSeason(s.id),
       fetchAnnouncements(s.id),
@@ -160,9 +160,14 @@ export function AdminSeasonPage() {
     reload().catch((e) => setErr(e instanceof Error ? e.message : 'Load failed'));
   }, [reload]);
 
+  const activePlayers = useMemo(
+    () => players.filter((p) => p.removed_at == null),
+    [players]
+  );
+
   const hydratePlayoffRosterForDate = useCallback(
     async (date: string) => {
-      if (!date || players.length === 0) return;
+      if (!date || activePlayers.length === 0) return;
       setErr(null);
       try {
         const night = nights.find((n) => n.night_date === date);
@@ -171,19 +176,19 @@ export function AdminSeasonPage() {
           const byPid = new Map(rows.map((r) => [r.player_id, r.attending]));
           setPlayoffRoster(
             Object.fromEntries(
-              players.map((p) => [p.id, byPid.get(p.id) ?? true])
+              activePlayers.map((p) => [p.id, byPid.get(p.id) ?? true])
             )
           );
         } else {
           setPlayoffRoster(
-            Object.fromEntries(players.map((p) => [p.id, true]))
+            Object.fromEntries(activePlayers.map((p) => [p.id, true]))
           );
         }
       } catch (er: unknown) {
         setErr(formatAppError(er));
       }
     },
-    [nights, players]
+    [nights, activePlayers]
   );
 
   const playoffNightId = useMemo(() => {
@@ -345,21 +350,21 @@ export function AdminSeasonPage() {
     setPlayoffRoster((prev) => {
       const next = { ...prev };
       let changed = false;
-      for (const p of players) {
+      for (const p of activePlayers) {
         if (!(p.id in next)) {
           next[p.id] = true;
           changed = true;
         }
       }
       for (const id of Object.keys(next)) {
-        if (!players.some((p) => p.id === id)) {
+        if (!activePlayers.some((p) => p.id === id)) {
           delete next[id];
           changed = true;
         }
       }
       return changed ? next : prev;
     });
-  }, [tab, players]);
+  }, [tab, activePlayers]);
 
   // Initialize and persist playoff date per season so admins can always get back
   // to the same playoff night without re-entering it.
@@ -412,7 +417,12 @@ export function AdminSeasonPage() {
   }
 
   async function removePlayer(id: string) {
-    if (!window.confirm('Remove this player from the season?')) return;
+    if (
+      !window.confirm(
+        'Remove this player from the roster for upcoming weeks? Past games and standings are kept.'
+      )
+    )
+      return;
     setBusy(true);
     setErr(null);
     try {
@@ -602,7 +612,7 @@ export function AdminSeasonPage() {
         nights.find((n) => n.night_date === playoffDate)?.id ??
         (await rpcAdminCreateGameNight(slug, playoffDate, null));
 
-      const attendingIds = players
+      const attendingIds = activePlayers
         .filter((p) => playoffRoster[p.id] === true)
         .map((p) => p.id);
 
@@ -656,7 +666,7 @@ export function AdminSeasonPage() {
       );
       await rpcSaveStageMatches(nightId, 'playoffs_pool', payload);
       await Promise.all(
-        players.map((p) =>
+        activePlayers.map((p) =>
           rpcSetAttendance(nightId, p.id, playoffRoster[p.id] === true)
         )
       );
@@ -844,7 +854,7 @@ export function AdminSeasonPage() {
             night page.
           </p>
           <ul className="list">
-            {players.map((p) => (
+            {activePlayers.map((p) => (
               <li key={p.id} className="list-row">
                 <span>
                   <strong>{p.display_name}</strong>
@@ -1032,7 +1042,7 @@ export function AdminSeasonPage() {
                 <div>
                   <h3 style={{ marginBottom: '0.5rem', fontSize: '1.05rem' }}>
                     Playoff roster (
-                    {players.filter((p) => playoffRoster[p.id] !== false).length})
+                    {activePlayers.filter((p) => playoffRoster[p.id] !== false).length})
                   </h3>
                   <p className="hint" style={{ marginTop: 0 }}>
                     Checked players are seeded and scheduled. Changing the date
@@ -1040,7 +1050,7 @@ export function AdminSeasonPage() {
                     date).
                   </p>
                   <ul className="list check-list">
-                    {players.map((p) => (
+                    {activePlayers.map((p) => (
                       <li key={p.id} className="list-row">
                         <label className="check">
                           <input

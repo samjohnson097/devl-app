@@ -157,7 +157,7 @@ export function HomePage() {
           Promise.all([
             fetchSeasonIntakeMondays(s.id),
             fetchAnnouncements(s.id),
-            fetchPlayers(s.id),
+            fetchPlayers(s.id, { includeRemoved: true }),
             fetchGameNights(s.id),
             fetchAllScoredMatchesForSeason(s.id),
           ])

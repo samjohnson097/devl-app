@@ -54,8 +54,8 @@ export function GameNightPage() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [manualAddOpen, setManualAddOpen] = useState(false);
-  const [manualRound, setManualRound] = useState(1);
-  const [manualCourt, setManualCourt] = useState(1);
+  const [manualRound, setManualRound] = useState('1');
+  const [manualCourt, setManualCourt] = useState('1');
   const [manual3v3, setManual3v3] = useState(false);
   const [manualPlayers, setManualPlayers] = useState({
     a1: '',
@@ -68,6 +68,11 @@ export function GameNightPage() {
   const [scheduleView, setScheduleView] = useState<
     'regular' | 'playoffs_pool' | 'playoffs_gold' | 'playoffs_silver'
   >('regular');
+
+  const rosterPlayers = useMemo(
+    () => players.filter((p) => p.removed_at == null),
+    [players]
+  );
 
   const nameById = useMemo(() => {
     const m = new Map<string, string>();
@@ -199,8 +204,8 @@ export function GameNightPage() {
   }, [visibleMatches, conflictRound, roundKeyFor]);
 
   const attendingPlayersMemo = useMemo(
-    () => players.filter((p) => !!attendance[p.id]),
-    [players, attendance]
+    () => rosterPlayers.filter((p) => !!attendance[p.id]),
+    [rosterPlayers, attendance]
   );
 
   const attendingOptionsMemo = useMemo(
@@ -213,10 +218,10 @@ export function GameNightPage() {
 
   const rosterSortedForManual = useMemo(
     () =>
-      players
+      rosterPlayers
         .slice()
         .sort((a, b) => a.display_name.localeCompare(b.display_name)),
-    [players]
+    [rosterPlayers]
   );
 
   // If the selected slot has no player (e.g. P3), default to first attending
@@ -251,14 +256,14 @@ export function GameNightPage() {
       }
       setNight(n);
       const [pl, att, mt] = await Promise.all([
-        fetchPlayers(s.id),
+        fetchPlayers(s.id, { includeRemoved: true }),
         fetchAttendance(nightId),
         fetchMatchesForNight(nightId),
       ]);
       setPlayers(pl);
       const attMap: Record<string, boolean> = {};
       for (const a of att) attMap[a.player_id] = a.attending;
-      for (const p of pl) {
+      for (const p of pl.filter((x) => x.removed_at == null)) {
         if (attMap[p.id] === undefined) attMap[p.id] = true;
       }
       setAttendance(attMap);
@@ -298,7 +303,7 @@ export function GameNightPage() {
   async function generateSchedule() {
     if (!nightId || !season || !night) return;
     const rounds = season.games_per_night;
-    const attendingIds = players
+    const attendingIds = rosterPlayers
       .filter((p) => attendance[p.id])
       .map((p) => p.id);
     if (attendingIds.length < 4) {
@@ -358,8 +363,8 @@ export function GameNightPage() {
   function openManualAddModal() {
     setErr(null);
     const r = rosterSortedForManual;
-    setManualRound(1);
-    setManualCourt(1);
+    setManualRound('1');
+    setManualCourt('1');
     setManual3v3(false);
     setManualPlayers({
       a1: r[0]?.id ?? '',
@@ -414,12 +419,21 @@ export function GameNightPage() {
 
   async function submitManualAddMatch() {
     if (!nightId) return;
-    const ri = manualRound - 1;
-    const ci = manualCourt - 1;
-    if (ri < 0 || ci < 0) {
-      setErr('Round and court must be at least 1.');
+    const roundNum = Number.parseInt(manualRound.trim(), 10);
+    const courtNum = Number.parseInt(manualCourt.trim(), 10);
+    if (
+      !Number.isFinite(roundNum) ||
+      roundNum < 1 ||
+      roundNum > 99 ||
+      !Number.isFinite(courtNum) ||
+      courtNum < 1 ||
+      courtNum > 12
+    ) {
+      setErr('Round must be 1–99 and court must be 1–12.');
       return;
     }
+    const ri = roundNum - 1;
+    const ci = courtNum - 1;
     const p = manualPlayers;
     const ids2 = [p.a1, p.a2, p.b1, p.b2].filter(Boolean);
     if (manual3v3) {
@@ -612,7 +626,7 @@ export function GameNightPage() {
     byRound.set(rk, list);
   }
   const rounds = Array.from(byRound.keys()).sort((a, b) => a - b);
-  const attendingCount = players.filter((p) => !!attendance[p.id]).length;
+  const attendingCount = rosterPlayers.filter((p) => !!attendance[p.id]).length;
   const attendingPlayers = attendingPlayersMemo;
   const attendingOptions = attendingOptionsMemo;
 
@@ -644,7 +658,7 @@ export function GameNightPage() {
             won’t be scheduled.
           </p>
           <ul className="list check-list">
-            {players.map((p) => (
+            {rosterPlayers.map((p) => (
               <li key={p.id} className="list-row">
                 <label className="check">
                   <input
@@ -969,28 +983,24 @@ export function GameNightPage() {
               <label className="field">
                 <span>Round</span>
                 <input
-                  type="number"
-                  min={1}
-                  max={99}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={manualRound}
                   onChange={(e) =>
-                    setManualRound(
-                      Math.max(1, Math.min(99, Number(e.target.value) || 1))
-                    )
+                    setManualRound(e.target.value.replace(/\D/g, ''))
                   }
                 />
               </label>
               <label className="field">
                 <span>Court</span>
                 <input
-                  type="number"
-                  min={1}
-                  max={12}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={manualCourt}
                   onChange={(e) =>
-                    setManualCourt(
-                      Math.max(1, Math.min(12, Number(e.target.value) || 1))
-                    )
+                    setManualCourt(e.target.value.replace(/\D/g, ''))
                   }
                 />
               </label>

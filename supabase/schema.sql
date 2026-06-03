@@ -37,6 +37,9 @@ create table if not exists public.players (
 alter table public.players
   add column if not exists pronouns text;
 
+alter table public.players
+  add column if not exists removed_at timestamptz;
+
 create index if not exists players_season_idx on public.players (season_id);
 
 create table if not exists public.game_nights (
@@ -253,6 +256,7 @@ begin
       on pma.player_id = p.id
      and pma.monday_date = v_night_date
     where p.season_id = v_season
+      and p.removed_at is null
   loop
     insert into public.attendance (game_night_id, player_id, attending)
     values (p_game_night_id, r.player_id, r.default_attending)
@@ -334,7 +338,18 @@ begin
   select season_id into v_season from public.players where id = p_player_id;
   if v_season is null then raise exception 'Player not found'; end if;
 
-  delete from public.players where id = p_player_id;
+  update public.players
+  set removed_at = now()
+  where id = p_player_id
+    and removed_at is null;
+
+  -- Drop attendance on future game nights only; past weeks and matches stay intact.
+  delete from public.attendance a
+  using public.game_nights gn
+  where a.player_id = p_player_id
+    and gn.id = a.game_night_id
+    and gn.season_id = v_season
+    and gn.night_date > current_date;
 end;
 $$;
 
