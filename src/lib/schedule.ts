@@ -49,6 +49,39 @@ function shuffleInPlace<T>(arr: T[]): T[] {
   return arr;
 }
 
+/** Weight for preferring low-3v3 players into 2v2 (and high-3v3 into the 3v3 court). */
+const THREE_V_THREE_FAIRNESS_WEIGHT = 72;
+
+function isThreeVThreeMatch(m: MatchLike): boolean {
+  return !!(m.team_a_p3 || m.team_b_p3);
+}
+
+function buildThreeVThreeCounts(matches: MatchLike[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const m of matches) {
+    if (!isThreeVThreeMatch(m)) continue;
+    const ids = [
+      m.team_a_p1,
+      m.team_a_p2,
+      m.team_a_p3,
+      m.team_b_p1,
+      m.team_b_p2,
+      m.team_b_p3,
+    ].filter(Boolean) as string[];
+    for (const id of ids) {
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
+function sumThreeVThreeForIds(
+  ids: string[],
+  threeVThreeTonight: Map<string, number>
+): number {
+  return ids.reduce((sum, id) => sum + (threeVThreeTonight.get(id) ?? 0), 0);
+}
+
 function buildHistoryFromMatches(matches: MatchLike[]): History {
   const partner = new Map<string, number>();
   const opponent = new Map<string, number>();
@@ -223,7 +256,9 @@ function pickBestQuartet(
   available: string[],
   history: History,
   tonight: History,
-  gamesTonight: Map<string, number>
+  gamesTonight: Map<string, number>,
+  threeVThreeTonight: Map<string, number>,
+  balanceThreeVThree: boolean
 ): string[] | null {
   if (available.length < 4) return null;
 
@@ -246,7 +281,13 @@ function pickBestQuartet(
       (gamesTonight.get(x) ?? 0) +
       (gamesTonight.get(y) ?? 0) +
       (gamesTonight.get(z) ?? 0);
-    const total = split.cost + fairness * 6;
+    let total = split.cost + fairness * 6;
+    if (balanceThreeVThree) {
+      // Prefer players who have already played 3v3 into 2v2 so the leftover six
+      // are those with the fewest 3v3 games this night.
+      total -=
+        sumThreeVThreeForIds(q, threeVThreeTonight) * THREE_V_THREE_FAIRNESS_WEIGHT;
+    }
     if (total < bestTotal) {
       bestTotal = total;
       bestQuartet = q;
@@ -292,7 +333,9 @@ function pickBestSix(
   available: string[],
   history: History,
   tonight: History,
-  gamesTonight: Map<string, number>
+  gamesTonight: Map<string, number>,
+  threeVThreeTonight: Map<string, number>,
+  balanceThreeVThree: boolean
 ): string[] | null {
   if (available.length < 6) return null;
   const sorted = [...available].sort(
@@ -307,7 +350,11 @@ function pickBestSix(
   for (const c of combos) {
     const split = bestSplitForSix(c as [string, string, string, string, string, string], history, tonight);
     const fairness = c.reduce((sum, id) => sum + (gamesTonight.get(id) ?? 0), 0);
-    const total = split.cost + fairness * 6;
+    let total = split.cost + fairness * 6;
+    if (balanceThreeVThree) {
+      total -=
+        sumThreeVThreeForIds(c, threeVThreeTonight) * THREE_V_THREE_FAIRNESS_WEIGHT;
+    }
     if (total < bestTotal) {
       bestTotal = total;
       best = c;
@@ -319,13 +366,20 @@ function pickBestSix(
 function pickSitOutPlayer(
   candidates: string[],
   sitTonight: Map<string, number>,
-  gamesTonight: Map<string, number>
+  gamesTonight: Map<string, number>,
+  threeVThreeTonight: Map<string, number>,
+  preferSitHighThreeVThree: boolean
 ): string | null {
   if (candidates.length === 0) return null;
   const sorted = [...candidates].sort((a, b) => {
     const sitA = sitTonight.get(a) ?? 0;
     const sitB = sitTonight.get(b) ?? 0;
     if (sitA !== sitB) return sitA - sitB;
+    if (preferSitHighThreeVThree) {
+      const tA = threeVThreeTonight.get(a) ?? 0;
+      const tB = threeVThreeTonight.get(b) ?? 0;
+      if (tA !== tB) return tB - tA;
+    }
     const gamesA = gamesTonight.get(a) ?? 0;
     const gamesB = gamesTonight.get(b) ?? 0;
     if (gamesA !== gamesB) return gamesA - gamesB;
@@ -352,8 +406,12 @@ export function buildSchedule(
   const tonight: History = { partner: new Map(), opponent: new Map() };
   const gamesTonight = new Map<string, number>();
   const sitTonight = new Map<string, number>();
-  for (const id of attending) gamesTonight.set(id, 0);
-  for (const id of attending) sitTonight.set(id, 0);
+  const threeVThreeTonight = buildThreeVThreeCounts(priorMatches);
+  for (const id of attending) {
+    gamesTonight.set(id, 0);
+    sitTonight.set(id, 0);
+    if (!threeVThreeTonight.has(id)) threeVThreeTonight.set(id, 0);
+  }
 
   const result: ScheduledMatch[] = [];
 
@@ -383,7 +441,13 @@ export function buildSchedule(
     // unless the night has more rounds than unique candidates.
     const shouldHaveSingleSitter = canApplySpecial && (rem === 1 || rem === 3);
     if (shouldHaveSingleSitter) {
-      const sitter = pickSitOutPlayer(available, sitTonight, gamesTonight);
+      const sitter = pickSitOutPlayer(
+        available,
+        sitTonight,
+        gamesTonight,
+        threeVThreeTonight,
+        threeVThreeCourt
+      );
       if (sitter) {
         const idx = available.indexOf(sitter);
         if (idx !== -1) available.splice(idx, 1);
@@ -392,7 +456,14 @@ export function buildSchedule(
     }
 
     for (let court = 0; court < twoVTwoCourts; court++) {
-      const quartet = pickBestQuartet(available, history, tonight, gamesTonight);
+      const quartet = pickBestQuartet(
+        available,
+        history,
+        tonight,
+        gamesTonight,
+        threeVThreeTonight,
+        threeVThreeCourt
+      );
       if (!quartet) break;
 
       const [w, x, y, z] = quartet as [string, string, string, string];
@@ -432,7 +503,14 @@ export function buildSchedule(
     }
 
     if (threeVThreeCourt) {
-      const six = pickBestSix(available, history, tonight, gamesTonight);
+      const six = pickBestSix(
+        available,
+        history,
+        tonight,
+        gamesTonight,
+        threeVThreeTonight,
+        true
+      );
       if (six) {
         const split = bestSplitForSix(
           six as [string, string, string, string, string, string],
@@ -473,11 +551,19 @@ export function buildSchedule(
           const idx = available.indexOf(id);
           if (idx !== -1) available.splice(idx, 1);
           gamesTonight.set(id, (gamesTonight.get(id) ?? 0) + 1);
+          threeVThreeTonight.set(id, (threeVThreeTonight.get(id) ?? 0) + 1);
         }
       }
     } else if (!canApplySpecial) {
       for (let court = twoVTwoCourts; court < nets; court++) {
-        const quartet = pickBestQuartet(available, history, tonight, gamesTonight);
+        const quartet = pickBestQuartet(
+          available,
+          history,
+          tonight,
+          gamesTonight,
+          threeVThreeTonight,
+          false
+        );
         if (!quartet) break;
         const [w, x, y, z] = quartet as [string, string, string, string];
         const split = bestSplitForQuartet(w, x, y, z, history, tonight);
