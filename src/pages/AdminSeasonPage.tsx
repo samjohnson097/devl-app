@@ -554,10 +554,11 @@ export function AdminSeasonPage() {
     const ok = window.confirm(
       `Cancel the week of ${label}?\n\n` +
         '• That Monday is removed from the 8-week intake list.\n' +
-        '• Every later Monday moves one calendar week forward; a new 8th Monday is added at the end.\n' +
-        '• Any game night on that date is deleted (scores lost).\n' +
-        '• Other game nights move forward with their data.\n' +
-        '• Player availability for every shifted or new Monday is cleared (unchecked) until you set it again.\n\n' +
+        '• All other Mondays keep their dates.\n' +
+        '• A new 8th Monday is added one week after the current last Monday.\n' +
+        '• Any game night on the canceled date is deleted (scores lost).\n' +
+        '• Other game nights and player availability for remaining Mondays are kept.\n' +
+        '• The new final Monday starts unchecked for everyone.\n\n' +
         'This cannot be undone from the app.'
     );
     if (!ok) return;
@@ -1481,14 +1482,13 @@ export function AdminSeasonPage() {
             </p>
           </section>
           <section className="card">
-            <h2>Cancel a week &amp; shift schedule</h2>
+            <h2>Cancel a week &amp; add a make-up week</h2>
             <p className="hint">
               Use when play is canceled for one Monday but you still want eight
-              league weeks. Later Mondays move forward a week and a new final
-              Monday is added. Availability for those moved/new Mondays is
-              cleared for every player—ask them to reopen the intake form, enter
-              the same email, load their schedule, and re-check the Mondays (or
-              fix attendance on each game night).
+              league weeks. The selected Monday is removed, every other Monday
+              keeps its date and player availability, and a new final Monday is
+              added at the end (unchecked until players update intake or you set
+              attendance).
             </p>
             {intakeMondays.length !== 8 ? (
               <p className="muted">

@@ -413,7 +413,7 @@ export async function rpcAdminTruncateSeasonWeeks(
   if (error) throw error;
 }
 
-/** Remove one Monday from the 8-week intake list, shift later weeks +7 days, add a new final Monday. Resets per-Monday availability to off for shifted/new weeks. */
+/** Remove one Monday from the 8-week intake list and append a new final Monday. Preserves other dates and player availability. */
 export async function rpcAdminCancelAndShiftIntakeWeek(
   seasonSlug: string,
   cancelMondayIso: string

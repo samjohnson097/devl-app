@@ -1287,7 +1287,7 @@ declare
   v_new date[];
   v_k int;
   v_i int;
-  v_dt date;
+  v_new_final date;
 begin
   perform public.assert_authenticated();
   select id into v_season from public.seasons where slug = p_season_slug;
@@ -1316,29 +1316,19 @@ begin
     raise exception 'Cancel date must match one of the season intake Mondays';
   end if;
 
+  -- Drop the canceled Monday; keep every other date unchanged; append one new week.
   for v_i in 1..(v_k - 1) loop
     v_new[v_i] := v_d[v_i];
   end loop;
-
-  for v_i in v_k..7 loop
-    v_new[v_i] := v_d[v_i + 1] + 7;
+  for v_i in (v_k + 1)..8 loop
+    v_new[v_i - 1] := v_d[v_i];
   end loop;
+  v_new_final := v_d[8] + 7;
+  v_new[8] := v_new_final;
 
-  if v_k < 8 then
-    v_new[8] := v_d[8] + 14;
-  else
-    v_new[8] := v_d[8] + 7;
-  end if;
-
+  -- Only the canceled night is deleted; other nights keep their dates and match data.
   delete from public.game_nights
   where season_id = v_season and night_date = p_cancel_monday;
-
-  for v_i in reverse (v_k + 1)..8 loop
-    v_dt := v_d[v_i];
-    update public.game_nights
-    set night_date = night_date + 7
-    where season_id = v_season and night_date = v_dt;
-  end loop;
 
   delete from public.season_intake_mondays where season_id = v_season;
   for v_i in 1..8 loop
@@ -1346,22 +1336,21 @@ begin
     values (v_season, v_new[v_i], v_i - 1);
   end loop;
 
+  -- Drop availability only for the canceled Monday; keep all other weeks as-is.
   delete from public.player_monday_availability pma
   using public.players p
   where p.id = pma.player_id
     and p.season_id = v_season
-    and pma.monday_date in (
-      select unnest(v_d[v_k:8])
-    );
+    and pma.monday_date = p_cancel_monday;
 
-  for v_i in v_k..8 loop
-    insert into public.player_monday_availability (player_id, monday_date, available)
-    select pl.id, v_new[v_i], false
-    from public.players pl
-    where pl.season_id = v_season
-    on conflict (player_id, monday_date) do update
-      set available = false;
-  end loop;
+  -- New final Monday starts unchecked for everyone still on the roster.
+  insert into public.player_monday_availability (player_id, monday_date, available)
+  select pl.id, v_new_final, false
+  from public.players pl
+  where pl.season_id = v_season
+    and pl.removed_at is null
+  on conflict (player_id, monday_date) do update
+    set available = excluded.available;
 end;
 $$;
 
