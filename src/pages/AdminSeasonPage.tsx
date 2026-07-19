@@ -1486,8 +1486,9 @@ export function AdminSeasonPage() {
               Use when play is canceled for one Monday but you still want eight
               league weeks. Later Mondays move forward a week and a new final
               Monday is added. Availability for those moved/new Mondays is
-              cleared for every player—re-check attendance on game night pages
-              or have players update intake if you reopen it.
+              cleared for every player—ask them to reopen the intake form, enter
+              the same email, load their schedule, and re-check the Mondays (or
+              fix attendance on each game night).
             </p>
             {intakeMondays.length !== 8 ? (
               <p className="muted">

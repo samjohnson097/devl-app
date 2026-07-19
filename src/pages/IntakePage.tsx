@@ -1,6 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { rpcGetIntakeFormData, rpcRegisterPlayer } from '../api/leagueApi';
+import {
+  rpcGetIntakeFormData,
+  rpcGetPlayerIntakeByEmail,
+  rpcRegisterPlayer,
+} from '../api/leagueApi';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { ConfigBanner, Layout } from '../components/Layout';
 import { formatAppError } from '../lib/errors';
@@ -22,8 +26,9 @@ export function IntakePage() {
     genderInclusive: false,
   });
   const [busy, setBusy] = useState(false);
+  const [loadBusy, setLoadBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
+  const [doneMessage, setDoneMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!slug || !isSupabaseConfigured) return;
@@ -53,6 +58,50 @@ export function IntakePage() {
     };
   }, [slug]);
 
+  async function loadExistingSchedule() {
+    if (!slug) return;
+    const trimmed = email.trim();
+    if (!trimmed) {
+      setErr('Enter the email you registered with, then load your schedule.');
+      return;
+    }
+    setErr(null);
+    setDoneMessage(null);
+    setLoadBusy(true);
+    try {
+      const row = await rpcGetPlayerIntakeByEmail(slug, trimmed);
+      if (!row) {
+        setErr(
+          'No roster entry found for that email. Check the spelling, or submit as a new player.'
+        );
+        return;
+      }
+      setName(row.displayName);
+      setPronouns(row.pronouns ?? '');
+      setAvailability((prev) => {
+        const next: Record<string, boolean> = {};
+        for (const d of mondays) next[d] = false;
+        for (const a of row.availability) {
+          if (a.date in next || mondays.includes(a.date)) {
+            next[a.date] = a.available;
+          }
+        }
+        // Keep any Monday keys from the form that weren't in the response.
+        for (const d of Object.keys(prev)) {
+          if (!(d in next)) next[d] = false;
+        }
+        return next;
+      });
+      setDoneMessage(
+        'Loaded your saved schedule. Update the Mondays below and submit to save.'
+      );
+    } catch (er: unknown) {
+      setErr(formatAppError(er));
+    } finally {
+      setLoadBusy(false);
+    }
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!slug) return;
@@ -63,14 +112,18 @@ export function IntakePage() {
     }
     setBusy(true);
     try {
-      await rpcRegisterPlayer(
+      const result = await rpcRegisterPlayer(
         slug,
         name.trim(),
         email.trim() || null,
         pronouns.trim() || null,
         mondays.map((date) => ({ date, available: !!availability[date] }))
       );
-      setDone(true);
+      setDoneMessage(
+        result.updated
+          ? 'Your availability was updated. You’re still on the roster—no duplicate entry.'
+          : 'You’re on the list. See you on the court.'
+      );
       setName('');
       setEmail('');
       setPronouns('');
@@ -120,11 +173,11 @@ export function IntakePage() {
   return (
     <Layout
       title={`Join — ${seasonName}`}
-      subtitle="Tell us your availability for the next 8 Mondays."
+      subtitle="Tell us your Monday availability. Already registered? Use the same email to update without creating a new entry."
     >
-      {done ? (
+      {doneMessage ? (
         <div className="card success-card">
-          <p>You’re on the list. See you on the court.</p>
+          <p>{doneMessage}</p>
         </div>
       ) : null}
 
@@ -141,14 +194,28 @@ export function IntakePage() {
             />
           </label>
           <label className="field">
-            <span>Email (optional)</span>
+            <span>Email</span>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
             />
+            <span className="hint" style={{ marginTop: '0.35rem' }}>
+              Use the same email when you update later (e.g. after a new night is
+              added). Optional for first-time join, but recommended.
+            </span>
           </label>
+          <div className="actions-row" style={{ marginTop: 0 }}>
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={loadBusy || busy || !email.trim()}
+              onClick={() => void loadExistingSchedule()}
+            >
+              {loadBusy ? 'Loading…' : 'Load my schedule'}
+            </button>
+          </div>
           <label className="field">
             <span>Pronouns (optional)</span>
             <input

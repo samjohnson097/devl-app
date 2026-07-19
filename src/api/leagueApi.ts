@@ -245,20 +245,76 @@ export async function rpcRegisterPlayer(
   email: string | null,
   pronouns: string | null,
   mondayAvailability: Array<{ date: string; available: boolean }>
-): Promise<string> {
+): Promise<{ playerId: string; updated: boolean }> {
   const sb = requireSupabase();
   const { data, error } = await sb.rpc(
     'register_player_with_monday_availability',
     {
-    p_season_slug: seasonSlug,
-    p_display_name: displayName,
-    p_email: email ?? null,
-    p_pronouns: pronouns ?? null,
-    p_availability: mondayAvailability,
+      p_season_slug: seasonSlug,
+      p_display_name: displayName,
+      p_email: email ?? null,
+      p_pronouns: pronouns ?? null,
+      p_availability: mondayAvailability,
     }
   );
   if (error) throw error;
-  return data as string;
+  // Supports jsonb return { player_id, updated } and legacy uuid-only return.
+  if (data != null && typeof data === 'object' && !Array.isArray(data)) {
+    const row = data as { player_id?: string; updated?: boolean };
+    if (typeof row.player_id === 'string') {
+      return { playerId: row.player_id, updated: !!row.updated };
+    }
+  }
+  return { playerId: String(data), updated: false };
+}
+
+export type PlayerIntakeByEmail = {
+  playerId: string;
+  displayName: string;
+  pronouns: string | null;
+  availability: Array<{ date: string; available: boolean }>;
+};
+
+export async function rpcGetPlayerIntakeByEmail(
+  seasonSlug: string,
+  email: string
+): Promise<PlayerIntakeByEmail | null> {
+  const sb = requireSupabase();
+  const { data, error } = await sb.rpc('get_player_intake_by_email', {
+    p_season_slug: seasonSlug,
+    p_email: email,
+  });
+  if (error) throw error;
+  if (data == null) return null;
+  const row = data as {
+    player_id?: string;
+    display_name?: string;
+    pronouns?: string | null;
+    availability?: unknown;
+  };
+  if (typeof row.player_id !== 'string' || typeof row.display_name !== 'string') {
+    return null;
+  }
+  const raw = Array.isArray(row.availability) ? row.availability : [];
+  const availability: Array<{ date: string; available: boolean }> = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const a = item as { date?: unknown; available?: unknown };
+    const date =
+      typeof a.date === 'string'
+        ? a.date.slice(0, 10)
+        : a.date != null
+          ? String(a.date).slice(0, 10)
+          : '';
+    if (!date) continue;
+    availability.push({ date, available: !!a.available });
+  }
+  return {
+    playerId: row.player_id,
+    displayName: row.display_name,
+    pronouns: row.pronouns ?? null,
+    availability,
+  };
 }
 
 export async function rpcAdminAddPlayer(
