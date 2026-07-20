@@ -18,6 +18,10 @@ create table if not exists public.seasons (
 alter table public.seasons
   add column if not exists hide_from_public boolean not null default false;
 
+alter table public.seasons
+  add column if not exists gold_winners_photo_url text,
+  add column if not exists silver_winners_photo_url text;
+
 create table if not exists public.season_secrets (
   season_id uuid primary key references public.seasons (id) on delete cascade,
   admin_token uuid not null default gen_random_uuid()
@@ -1181,6 +1185,46 @@ begin
 end;
 $$;
 
+drop function if exists public.admin_set_winners_photo(text, text, text);
+create or replace function public.admin_set_winners_photo(
+  p_season_slug text,
+  p_bracket text,
+  p_photo_url text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+set row_security = off
+as $$
+declare
+  v_season uuid;
+  v_bracket text;
+  v_url text;
+begin
+  perform public.assert_authenticated();
+  select id into v_season from public.seasons where slug = p_season_slug;
+  if v_season is null then raise exception 'Season not found'; end if;
+
+  v_bracket := lower(trim(coalesce(p_bracket, '')));
+  if v_bracket not in ('gold', 'silver') then
+    raise exception 'Bracket must be gold or silver';
+  end if;
+
+  v_url := nullif(trim(coalesce(p_photo_url, '')), '');
+
+  if v_bracket = 'gold' then
+    update public.seasons
+    set gold_winners_photo_url = v_url
+    where id = v_season;
+  else
+    update public.seasons
+    set silver_winners_photo_url = v_url
+    where id = v_season;
+  end if;
+end;
+$$;
+
 drop function if exists public.submit_league_feedback(text, text);
 create or replace function public.submit_league_feedback(
   p_season_slug text,
@@ -1251,6 +1295,7 @@ grant execute on function public.admin_truncate_season_weeks(text, int) to authe
 grant execute on function public.admin_add_announcement(text, text) to authenticated;
 grant execute on function public.admin_delete_announcement(uuid) to authenticated;
 grant execute on function public.admin_set_season_hide_from_public(text, boolean) to authenticated;
+grant execute on function public.admin_set_winners_photo(text, text, text) to authenticated;
 
 grant select on public.league_feedback to authenticated;
 revoke all on table public.league_feedback from anon;
@@ -1262,6 +1307,7 @@ revoke execute on function public.admin_truncate_season_weeks(text, int) from an
 revoke execute on function public.admin_add_announcement(text, text) from anon;
 revoke execute on function public.admin_delete_announcement(uuid) from anon;
 revoke execute on function public.admin_set_season_hide_from_public(text, boolean) from anon;
+revoke execute on function public.admin_set_winners_photo(text, text, text) from anon;
 
 -- Cancel one intake/play week: remove that Monday, shift all later Mondays by +7 days,
 -- add a new 8th Monday at the end. Per-player Monday availability for the shifted and
@@ -1469,3 +1515,44 @@ drop policy if exists "league_feedback_select_authenticated" on public.league_fe
 create policy "league_feedback_select_authenticated" on public.league_feedback
   for select to authenticated
   using (true);
+
+-- Public season winners photos (gold / silver). Authenticated organizers upload.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'season-winners',
+  'season-winners',
+  true,
+  5242880,
+  array['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+)
+on conflict (id) do update
+set
+  public = excluded.public,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "season_winners_public_read" on storage.objects;
+create policy "season_winners_public_read"
+  on storage.objects for select
+  to public
+  using (bucket_id = 'season-winners');
+
+drop policy if exists "season_winners_auth_insert" on storage.objects;
+create policy "season_winners_auth_insert"
+  on storage.objects for insert
+  to authenticated
+  with check (bucket_id = 'season-winners');
+
+drop policy if exists "season_winners_auth_update" on storage.objects;
+create policy "season_winners_auth_update"
+  on storage.objects for update
+  to authenticated
+  using (bucket_id = 'season-winners')
+  with check (bucket_id = 'season-winners');
+
+drop policy if exists "season_winners_auth_delete" on storage.objects;
+create policy "season_winners_auth_delete"
+  on storage.objects for delete
+  to authenticated
+  using (bucket_id = 'season-winners');
+

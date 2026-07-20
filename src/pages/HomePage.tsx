@@ -56,6 +56,12 @@ export function HomePage() {
   const [selectedSlug, setSelectedSlug] = useState<string>('');
   const [selectedSeasonName, setSelectedSeasonName] = useState<string>('');
   const [selectedGamesPerNight, setSelectedGamesPerNight] = useState<number>(5);
+  const [goldWinnersPhotoUrl, setGoldWinnersPhotoUrl] = useState<string | null>(
+    null
+  );
+  const [silverWinnersPhotoUrl, setSilverWinnersPhotoUrl] = useState<
+    string | null
+  >(null);
   const [intakeDateRows, setIntakeDateRows] = useState<IntakeDateRow[]>([]);
   const [announcements, setAnnouncements] = useState<
     Array<{ id: string; message: string; created_at: string }>
@@ -148,9 +154,15 @@ export function HomePage() {
     try {
       const sb = requireSupabase();
       const s = await withJwtRetry(sb, () => fetchSeasonBySlug(selectedSlug));
-      if (!s) return;
+      if (!s) {
+        setGoldWinnersPhotoUrl(null);
+        setSilverWinnersPhotoUrl(null);
+        return;
+      }
       setSelectedSeasonName(s.name);
       setSelectedGamesPerNight(s.games_per_night ?? 5);
+      setGoldWinnersPhotoUrl(s.gold_winners_photo_url ?? null);
+      setSilverWinnersPhotoUrl(s.silver_winners_photo_url ?? null);
       const [mons, anns, players, nights, scored] = await withJwtRetry(
         sb,
         () =>
@@ -469,6 +481,37 @@ export function HomePage() {
               </ul>
             )}
           </section>
+
+          {goldWinnersPhotoUrl || silverWinnersPhotoUrl ? (
+            <section className="card champions-card">
+              <h2>Champions</h2>
+              <p className="muted champions-lead">
+                Gold and silver division winners for {selectedSeasonName || 'this season'}.
+              </p>
+              <div className="champions-grid">
+                {goldWinnersPhotoUrl ? (
+                  <figure className="champions-slot">
+                    <img
+                      src={goldWinnersPhotoUrl}
+                      alt="Gold division winners"
+                      className="champions-photo"
+                    />
+                    <figcaption>Gold</figcaption>
+                  </figure>
+                ) : null}
+                {silverWinnersPhotoUrl ? (
+                  <figure className="champions-slot">
+                    <img
+                      src={silverWinnersPhotoUrl}
+                      alt="Silver division winners"
+                      className="champions-photo"
+                    />
+                    <figcaption>Silver</figcaption>
+                  </figure>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
 
           <section className="card season-card">
             <h2>{selectedSeasonName || 'Current season'}</h2>

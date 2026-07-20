@@ -12,6 +12,8 @@ export interface SeasonRow {
   created_at: string;
   /** When true, anon users cannot list or read this season (join link still works). */
   hide_from_public?: boolean;
+  gold_winners_photo_url?: string | null;
+  silver_winners_photo_url?: string | null;
 }
 
 export interface AnnouncementRow {
@@ -387,6 +389,93 @@ export async function rpcAdminSetSeasonHideFromPublic(
     p_hide: hide,
   });
   if (error) throw error;
+}
+
+export type WinnersBracket = 'gold' | 'silver';
+
+export async function rpcAdminSetWinnersPhoto(
+  seasonSlug: string,
+  bracket: WinnersBracket,
+  photoUrl: string | null
+): Promise<void> {
+  const sb = requireSupabase();
+  const { error } = await sb.rpc('admin_set_winners_photo', {
+    p_season_slug: seasonSlug,
+    p_bracket: bracket,
+    p_photo_url: photoUrl,
+  });
+  if (error) throw error;
+}
+
+function winnersPhotoExtension(file: File): string {
+  const fromName = file.name.split('.').pop()?.toLowerCase();
+  if (fromName && ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(fromName)) {
+    return fromName === 'jpeg' ? 'jpg' : fromName;
+  }
+  if (file.type === 'image/png') return 'png';
+  if (file.type === 'image/webp') return 'webp';
+  if (file.type === 'image/gif') return 'gif';
+  return 'jpg';
+}
+
+/** Upload to Storage and save the public URL on the season. */
+export async function uploadSeasonWinnersPhoto(
+  seasonId: string,
+  seasonSlug: string,
+  bracket: WinnersBracket,
+  file: File
+): Promise<string> {
+  if (!file.type.startsWith('image/')) {
+    throw new Error('Please choose an image file (JPEG, PNG, WebP, or GIF).');
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    throw new Error('Image must be 5 MB or smaller.');
+  }
+
+  const sb = requireSupabase();
+  const ext = winnersPhotoExtension(file);
+  const path = `${seasonId}/${bracket}.${ext}`;
+
+  // Remove any prior extension variants so only one file remains per bracket.
+  const { data: existing } = await sb.storage
+    .from('season-winners')
+    .list(seasonId);
+  const stale = (existing ?? [])
+    .map((f) => f.name)
+    .filter((name) => name.startsWith(`${bracket}.`) && name !== `${bracket}.${ext}`)
+    .map((name) => `${seasonId}/${name}`);
+  if (stale.length > 0) {
+    await sb.storage.from('season-winners').remove(stale);
+  }
+
+  const { error: upErr } = await sb.storage
+    .from('season-winners')
+    .upload(path, file, { upsert: true, contentType: file.type, cacheControl: '3600' });
+  if (upErr) throw upErr;
+
+  const { data } = sb.storage.from('season-winners').getPublicUrl(path);
+  const url = `${data.publicUrl}?v=${Date.now()}`;
+  await rpcAdminSetWinnersPhoto(seasonSlug, bracket, url);
+  return url;
+}
+
+export async function clearSeasonWinnersPhoto(
+  seasonId: string,
+  seasonSlug: string,
+  bracket: WinnersBracket
+): Promise<void> {
+  const sb = requireSupabase();
+  const { data: existing } = await sb.storage
+    .from('season-winners')
+    .list(seasonId);
+  const toRemove = (existing ?? [])
+    .map((f) => f.name)
+    .filter((name) => name.startsWith(`${bracket}.`))
+    .map((name) => `${seasonId}/${name}`);
+  if (toRemove.length > 0) {
+    await sb.storage.from('season-winners').remove(toRemove);
+  }
+  await rpcAdminSetWinnersPhoto(seasonSlug, bracket, null);
 }
 
 export async function rpcAdminSetIntakeMondays(

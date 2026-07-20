@@ -22,6 +22,8 @@ import {
   rpcAdminCancelAndShiftIntakeWeek,
   rpcAdminSetIntakeMondays,
   rpcAdminTruncateSeasonWeeks,
+  uploadSeasonWinnersPhoto,
+  clearSeasonWinnersPhoto,
   rpcSaveStageMatches,
   rpcSetAttendance,
   type AnnouncementRow,
@@ -30,6 +32,7 @@ import {
   type PlayerRow,
   type SeasonIntakeMondayRow,
   type SeasonRow,
+  type WinnersBracket,
 } from '../api/leagueApi';
 import {
   buildPlayoffPoolMatchPayload,
@@ -94,6 +97,9 @@ export function AdminSeasonPage() {
   const [defaultSeasonSaved, setDefaultSeasonSaved] = useState(false);
   const [hideFromPublic, setHideFromPublic] = useState(false);
   const [hideFromPublicBusy, setHideFromPublicBusy] = useState(false);
+  const [winnersPhotoBusy, setWinnersPhotoBusy] = useState<WinnersBracket | null>(
+    null
+  );
   const [editPlayerId, setEditPlayerId] = useState<string | null>(null);
   const [editPlayerDraft, setEditPlayerDraft] = useState('');
   const [editPlayerBusy, setEditPlayerBusy] = useState(false);
@@ -342,6 +348,45 @@ export function AdminSeasonPage() {
       setErr(formatAppError(er));
     } finally {
       setHideFromPublicBusy(false);
+    }
+  }
+
+  async function onWinnersPhotoSelected(
+    bracket: WinnersBracket,
+    file: File | null
+  ) {
+    if (!slug || !season || !file) return;
+    setWinnersPhotoBusy(bracket);
+    setErr(null);
+    try {
+      const sb = requireSupabase();
+      await withJwtRetry(sb, () =>
+        uploadSeasonWinnersPhoto(season.id, slug, bracket, file)
+      );
+      await reload();
+    } catch (er: unknown) {
+      setErr(formatAppError(er));
+    } finally {
+      setWinnersPhotoBusy(null);
+    }
+  }
+
+  async function onClearWinnersPhoto(bracket: WinnersBracket) {
+    if (!slug || !season) return;
+    const label = bracket === 'gold' ? 'gold' : 'silver';
+    if (!window.confirm(`Remove the ${label} winners photo?`)) return;
+    setWinnersPhotoBusy(bracket);
+    setErr(null);
+    try {
+      const sb = requireSupabase();
+      await withJwtRetry(sb, () =>
+        clearSeasonWinnersPhoto(season.id, slug, bracket)
+      );
+      await reload();
+    } catch (er: unknown) {
+      setErr(formatAppError(er));
+    } finally {
+      setWinnersPhotoBusy(null);
     }
   }
 
@@ -1349,6 +1394,70 @@ export function AdminSeasonPage() {
               >
                 {hideFromPublicBusy ? 'Saving…' : 'Save visibility'}
               </button>
+            </div>
+          </section>
+          <section className="card">
+            <h2>Champions photos</h2>
+            <p className="hint">
+              After playoffs, upload a photo of the gold and silver winners.
+              They appear on the public home page for this season.
+            </p>
+            <div className="winners-admin-grid">
+              {(
+                [
+                  {
+                    bracket: 'gold' as const,
+                    title: 'Gold division',
+                    url: season?.gold_winners_photo_url ?? null,
+                  },
+                  {
+                    bracket: 'silver' as const,
+                    title: 'Silver division',
+                    url: season?.silver_winners_photo_url ?? null,
+                  },
+                ] as const
+              ).map(({ bracket, title, url }) => (
+                <div key={bracket} className="winners-admin-slot">
+                  <h3 className="winners-admin-slot-title">{title}</h3>
+                  {url ? (
+                    <img
+                      src={url}
+                      alt={`${title} winners`}
+                      className="winners-admin-preview"
+                    />
+                  ) : (
+                    <p className="muted" style={{ margin: 0 }}>
+                      No photo yet.
+                    </p>
+                  )}
+                  <div className="actions-row" style={{ marginTop: '0.65rem' }}>
+                    <label className="btn secondary" style={{ cursor: 'pointer' }}>
+                      {winnersPhotoBusy === bracket ? 'Uploading…' : 'Upload'}
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,image/gif"
+                        style={{ display: 'none' }}
+                        disabled={winnersPhotoBusy != null || busy}
+                        onChange={(e) => {
+                          const f = e.target.files?.[0] ?? null;
+                          e.target.value = '';
+                          void onWinnersPhotoSelected(bracket, f);
+                        }}
+                      />
+                    </label>
+                    {url ? (
+                      <button
+                        type="button"
+                        className="btn text danger"
+                        disabled={winnersPhotoBusy != null || busy}
+                        onClick={() => void onClearWinnersPhoto(bracket)}
+                      >
+                        Remove
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
             </div>
           </section>
           <section className="card">
