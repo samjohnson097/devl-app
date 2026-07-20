@@ -428,8 +428,8 @@ export async function uploadSeasonWinnersPhoto(
   if (!file.type.startsWith('image/')) {
     throw new Error('Please choose an image file (JPEG, PNG, WebP, or GIF).');
   }
-  if (file.size > 5 * 1024 * 1024) {
-    throw new Error('Image must be 5 MB or smaller.');
+  if (file.size > 20 * 1024 * 1024) {
+    throw new Error('Image must be 20 MB or smaller.');
   }
 
   const sb = requireSupabase();
