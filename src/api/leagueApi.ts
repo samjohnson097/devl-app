@@ -539,6 +539,14 @@ export async function fetchGameNightById(
   return data as GameNightRow | null;
 }
 
+export async function rpcAdminSeedAttendance(gameNightId: string): Promise<void> {
+  const sb = requireSupabase();
+  const { error } = await sb.rpc('admin_seed_attendance', {
+    p_game_night_id: gameNightId,
+  });
+  if (error) throw error;
+}
+
 export async function rpcAdminCreateGameNight(
   seasonSlug: string,
   nightDate: string,

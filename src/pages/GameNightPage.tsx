@@ -11,6 +11,7 @@ import {
   rpcInsertRegularMatch,
   rpcSaveSchedule,
   rpcAdminUpdateMatchPlayers,
+  rpcAdminSeedAttendance,
   rpcSetAttendance,
   rpcSetMatchScore,
   type MatchRow,
@@ -255,6 +256,11 @@ export function GameNightPage() {
         return;
       }
       setNight(n);
+      try {
+        await withJwtRetry(requireSupabase(), () => rpcAdminSeedAttendance(nightId));
+      } catch {
+        // Older databases without the updated seed still load stored attendance.
+      }
       const [pl, att, mt] = await Promise.all([
         fetchPlayers(s.id, { includeRemoved: true }),
         fetchAttendance(nightId),
@@ -654,8 +660,10 @@ export function GameNightPage() {
         </summary>
         <div className="game-night-roster-body">
           <p className="hint">
-            Everyone on the roster appears here. Turn off anyone who’s out; they
-            won’t be scheduled.
+            Checked players come from intake for this Monday. Anyone who left a
+            date unchecked is off until you turn them on. A change you make here
+            is kept; reopening the night will not reset it. Walk-ons stay
+            unchecked on later nights until you turn them on for that night.
           </p>
           <ul className="list check-list">
             {rosterPlayers.map((p) => (

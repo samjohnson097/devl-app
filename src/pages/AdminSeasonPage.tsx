@@ -451,7 +451,7 @@ export function AdminSeasonPage() {
     setBusy(true);
     setErr(null);
     try {
-      await rpcAdminAddPlayer(slug, newName.trim(), true, false);
+      await rpcAdminAddPlayer(slug, newName.trim(), false, false);
       setNewName('');
       await reload();
     } catch (er: unknown) {
@@ -626,7 +626,7 @@ export function AdminSeasonPage() {
     setBusy(true);
     setErr(null);
     try {
-      await rpcAdminAddPlayer(slug, playoffWalkOnName.trim(), true, false);
+      await rpcAdminAddPlayer(slug, playoffWalkOnName.trim(), false, false);
       setPlayoffWalkOnName('');
       await reload();
     } catch (er: unknown) {

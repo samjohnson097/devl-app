@@ -61,8 +61,13 @@ create table if not exists public.attendance (
   game_night_id uuid not null references public.game_nights (id) on delete cascade,
   player_id uuid not null references public.players (id) on delete cascade,
   attending boolean not null default true,
+  -- true after an organizer toggles this player; intake sync will not overwrite it
+  manual boolean not null default false,
   primary key (game_night_id, player_id)
 );
+
+alter table public.attendance
+  add column if not exists manual boolean not null default false;
 
 create table if not exists public.matches (
   id uuid primary key default gen_random_uuid(),
@@ -251,10 +256,22 @@ begin
   where id = p_game_night_id;
   if v_season is null then raise exception 'Game night not found'; end if;
 
+  -- A submitted intake form is the source of truth for that Monday.
+  -- Walk-ons with no intake form stay unchecked until an organizer turns them on for that night.
+  -- Nights that already have matches keep existing rows (only fill missing players).
+  -- Organizer toggles set attendance.manual and are not overwritten.
   for r in
     select
       p.id as player_id,
-      coalesce(pma.available, p.monday_available) as default_attending
+      case
+        when pma.player_id is not null then pma.available
+        when exists (
+          select 1
+          from public.player_monday_availability any_pma
+          where any_pma.player_id = p.id
+        ) then false
+        else false
+      end as default_attending
     from public.players p
     left join public.player_monday_availability pma
       on pma.player_id = p.id
@@ -262,9 +279,16 @@ begin
     where p.season_id = v_season
       and p.removed_at is null
   loop
-    insert into public.attendance (game_night_id, player_id, attending)
-    values (p_game_night_id, r.player_id, r.default_attending)
-    on conflict (game_night_id, player_id) do nothing;
+    insert into public.attendance (game_night_id, player_id, attending, manual)
+    values (p_game_night_id, r.player_id, r.default_attending, false)
+    on conflict (game_night_id, player_id) do update
+      set attending = excluded.attending
+      where public.attendance.manual is not true
+        and not exists (
+          select 1
+          from public.matches m
+          where m.game_night_id = p_game_night_id
+        );
   end loop;
 end;
 $$;
@@ -289,10 +313,11 @@ begin
   from public.game_nights gn where gn.id = p_game_night_id;
   if v_season is null then raise exception 'Game night not found'; end if;
 
-  insert into public.attendance (game_night_id, player_id, attending)
-  values (p_game_night_id, p_player_id, p_attending)
+  insert into public.attendance (game_night_id, player_id, attending, manual)
+  values (p_game_night_id, p_player_id, p_attending, true)
   on conflict (game_night_id, player_id) do update
-    set attending = excluded.attending;
+    set attending = excluded.attending,
+        manual = true;
 end;
 $$;
 
@@ -300,7 +325,7 @@ drop function if exists public.admin_add_player(text, uuid, text, boolean, boole
 create or replace function public.admin_add_player(
   p_season_slug text,
   p_display_name text,
-  p_monday boolean default true,
+  p_monday boolean default false,
   p_thursday boolean default false
 )
 returns uuid
