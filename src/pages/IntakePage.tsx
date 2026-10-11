@@ -225,7 +225,11 @@ export function IntakePage() {
             />
           </label>
           <fieldset className="fieldset">
-            <legend>Upcoming Mondays</legend>
+            <legend>Mondays you can play</legend>
+            <p className="hint" style={{ marginTop: 0 }}>
+              Check each Monday you can attend. Leave a week unchecked if you are
+              unavailable — that week will be off when the game night is created.
+            </p>
             {mondays.map((date) => (
               <label className="check" key={date}>
                 <input

@@ -45,12 +45,7 @@ begin
     values (p_game_night_id, r.player_id, r.default_attending, false)
     on conflict (game_night_id, player_id) do update
       set attending = excluded.attending
-      where public.attendance.manual is not true
-        and not exists (
-          select 1
-          from public.matches m
-          where m.game_night_id = p_game_night_id
-        );
+      where public.attendance.manual is not true;
   end loop;
 end;
 $function$;

@@ -258,7 +258,6 @@ begin
 
   -- A submitted intake form is the source of truth for that Monday.
   -- Walk-ons with no intake form stay unchecked until an organizer turns them on for that night.
-  -- Nights that already have matches keep existing rows (only fill missing players).
   -- Organizer toggles set attendance.manual and are not overwritten.
   for r in
     select
@@ -283,12 +282,7 @@ begin
     values (p_game_night_id, r.player_id, r.default_attending, false)
     on conflict (game_night_id, player_id) do update
       set attending = excluded.attending
-      where public.attendance.manual is not true
-        and not exists (
-          select 1
-          from public.matches m
-          where m.game_night_id = p_game_night_id
-        );
+      where public.attendance.manual is not true;
   end loop;
 end;
 $$;

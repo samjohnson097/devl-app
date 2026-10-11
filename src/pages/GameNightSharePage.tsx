@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   fetchAttendance,
+  fetchMondayAvailability,
+  attendanceFromIntake,
   fetchGameNightById,
   fetchMatchesForNight,
   fetchPlayers,
@@ -53,12 +55,16 @@ export function GameNightSharePage() {
       ]);
       setPlayers(pl);
       setMatches(mt);
-      const attMap: Record<string, boolean> = {};
-      for (const a of att) attMap[a.player_id] = a.attending;
-      for (const p of pl.filter((x) => x.removed_at == null)) {
-        if (attMap[p.id] === undefined) attMap[p.id] = true;
-      }
-      setAttendance(attMap);
+      const rosterIds = pl.filter((p) => p.removed_at == null).map((p) => p.id);
+      const availability = await fetchMondayAvailability(rosterIds);
+      setAttendance(
+        attendanceFromIntake({
+          playerIds: rosterIds,
+          nightDate: n.night_date,
+          attendance: att,
+          availability,
+        })
+      );
     } finally {
       setLoading(false);
     }

@@ -66,6 +66,8 @@ export interface AttendanceRow {
   game_night_id: string;
   player_id: string;
   attending: boolean;
+  /** Set when an organizer toggled this player on this night. */
+  manual?: boolean;
 }
 
 export interface MatchRow {
@@ -577,6 +579,65 @@ export async function fetchAttendance(
     .eq('game_night_id', gameNightId);
   if (error) throw error;
   return (data ?? []) as AttendanceRow[];
+}
+
+export interface MondayAvailabilityRow {
+  player_id: string;
+  monday_date: string;
+  available: boolean;
+}
+
+export async function fetchMondayAvailability(
+  playerIds: string[]
+): Promise<MondayAvailabilityRow[]> {
+  if (playerIds.length === 0) return [];
+  const sb = requireSupabase();
+  const { data, error } = await sb
+    .from('player_monday_availability')
+    .select('player_id, monday_date, available')
+    .in('player_id', playerIds);
+  if (error) throw error;
+  return (data ?? []) as MondayAvailabilityRow[];
+}
+
+function isoDay(value: string): string {
+  return value.slice(0, 10);
+}
+
+/**
+ * Intake is the source of truth unless an organizer toggled that player
+ * (`attendance.manual`). A submitted form with this Monday unchecked is out.
+ * Walk-ons with no form use the stored night checkbox, otherwise unchecked.
+ */
+export function attendanceFromIntake(params: {
+  playerIds: string[];
+  nightDate: string;
+  attendance: AttendanceRow[];
+  availability: MondayAvailabilityRow[];
+}): Record<string, boolean> {
+  const night = isoDay(params.nightDate);
+  const formByPlayer = new Map<string, Map<string, boolean>>();
+  for (const row of params.availability) {
+    const days = formByPlayer.get(row.player_id) ?? new Map<string, boolean>();
+    days.set(isoDay(row.monday_date), !!row.available);
+    formByPlayer.set(row.player_id, days);
+  }
+  const stored = new Map(params.attendance.map((row) => [row.player_id, row]));
+  const out: Record<string, boolean> = {};
+  for (const id of params.playerIds) {
+    const row = stored.get(id);
+    if (row?.manual === true) {
+      out[id] = !!row.attending;
+      continue;
+    }
+    const form = formByPlayer.get(id);
+    if (form && form.size > 0) {
+      out[id] = form.get(night) ?? false;
+      continue;
+    }
+    out[id] = row ? !!row.attending : false;
+  }
+  return out;
 }
 
 export async function rpcSetAttendance(
